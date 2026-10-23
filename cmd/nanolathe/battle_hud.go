@@ -235,6 +235,16 @@ type retailBattleHUD struct {
 // GUI/GAF loads are cached at battle entry in the HUD maps (windows/pages) so
 // the frame loop does not re-read VFS [07 §4].
 func loadRetailBattleHUD(fs vfs.FSOps, sess *session.Session, cat *content.Catalog, pal *palette.Tables, shell *gameShell, windowContext *battleWindowContext) (*retailBattleHUD, error) {
+	var owner uint8
+	if sess != nil {
+		owner = sess.LocalOwner
+	}
+	return loadRetailBattleHUDForOwner(fs, sess, cat, pal, shell, windowContext, owner)
+}
+
+// Prepare a different player's HUD before committing replay takeover, so an
+// unavailable faction asset leaves playback untouched (DESIGN_MULTIPLAYER §10.1).
+func loadRetailBattleHUDForOwner(fs vfs.FSOps, sess *session.Session, cat *content.Catalog, pal *palette.Tables, shell *gameShell, windowContext *battleWindowContext, owner uint8) (*retailBattleHUD, error) {
 	if fs == nil || sess == nil || cat == nil {
 		return nil, fmt.Errorf("nanolathe: battle HUD load failed: no mounted content, session or catalog")
 	}
@@ -244,7 +254,7 @@ func loadRetailBattleHUD(fs vfs.FSOps, sess *session.Session, cat *content.Catal
 	if windowContext == nil {
 		return nil, fmt.Errorf("nanolathe: battle HUD load failed: no window build context")
 	}
-	side, err := battleSide(fs, sess, cat, shell)
+	side, err := battleSideForOwner(fs, sess, cat, shell, owner)
 	if err != nil {
 		return nil, err
 	}
@@ -385,7 +395,7 @@ func loadRetailBattleHUD(fs vfs.FSOps, sess *session.Session, cat *content.Catal
 	var resultPanel *ui.Panel
 	h := &retailBattleHUD{
 		shell: shell, windowContext: windowContext, optionsRelabel: optionsRelabel,
-		side: side, cat: cat, owner: sess.LocalOwner, anchors: anchors, console: console, guiFont: guiFont, primaryFont: primaryFont, developerFont: developerFont, pal: pal,
+		side: side, cat: cat, owner: owner, anchors: anchors, console: console, guiFont: guiFont, primaryFont: primaryFont, developerFont: developerFont, pal: pal,
 		panelTop: panelTop, panelSide: panelSide, panelBottom: panelBottom,
 		intGAF: intGAF, common: common, oldMain: oldMain, share: share, logos: logos,
 		optionsGAF: optionsGAF, optionsWin: optionsWin, talkWin: talkWin, exitWin: exitWin, confirmWin: confirmWin, restartWin: restartWin,
@@ -459,7 +469,7 @@ func loadRetailBattleHUD(fs vfs.FSOps, sess *session.Session, cat *content.Catal
 		fogFill = pal.Logical[render.FogDarkPaletteIndex]
 	}
 	h.radarConfig = render.MinimapServiceConfig{
-		MapW: mapW, MapH: mapH, LocalSlot: sess.LocalOwner,
+		MapW: mapW, MapH: mapH, LocalSlot: owner,
 		FogFill: fogFill, GUIRemap: guiRemap,
 	}
 	cfg := h.radarConfig
@@ -718,7 +728,7 @@ func (h *retailBattleHUD) openResultWindow() {
 // the interface side from unit identity, and the scan simply failed on the Arm
 // campaign's first mission (AC01), which gives the local player no commander at
 // all — the HUD then refused to build with "local side -1 is unavailable".
-func battleSide(fs vfs.FSOps, sess *session.Session, cat *content.Catalog, shell *gameShell) (*content.SideDef, error) {
+func battleSideForOwner(fs vfs.FSOps, sess *session.Session, cat *content.Catalog, shell *gameShell, owner uint8) (*content.SideDef, error) {
 	if cat == nil || len(cat.Sides) == 0 {
 		return nil, fmt.Errorf("nanolathe: battle side selection failed: no compiled side definitions [02 §6]")
 	}
@@ -731,7 +741,7 @@ func battleSide(fs vfs.FSOps, sess *session.Session, cat *content.Catalog, shell
 		// the rule words and the map name into the setup record, which would
 		// leave a restored battle rendering the Arm interface for a Core
 		// player [08 R-SKIR-01 §2] "Save persistence".
-		if side, ok := sess.SideForOwner(int(sess.LocalOwner)); ok {
+		if side, ok := sess.SideForOwner(int(owner)); ok {
 			idx = side
 		}
 	}

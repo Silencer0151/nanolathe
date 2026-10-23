@@ -487,6 +487,33 @@ func TestReplayOnlineSeatsRecordTheSameStreamRetail(t *testing.T) {
 	if s := p.Status(); s.Mismatch != nil || s.Err != nil || s.End != replay.EndFinished || s.Verified != int(p.FinalTick()/30) || b.sess.UnitStateChecksum() != finals[0] || b.isResultVisible() {
 		t.Fatalf("online playback ended %+v", s)
 	}
+	// Reopen at an interior pump, take the other human and let the local
+	// host supply granted ticks and commands without a network driver.
+	fork := openReplayWindow(t, replayTestOptions(t, "--replay", paths[0]), cs)
+	fb := fork.shell.battle
+	fp := fb.playback
+	for range 60 {
+		fork.step(1)
+	}
+	if err := fp.SetPerspective(1); err != nil {
+		t.Fatal(err)
+	}
+	at := fp.Tick()
+	fp.apply(replayKeyTakeover)
+	fork.step(1)
+	if fb.takeover == nil || fb.playback != nil || fb.multiplayer != nil || !fb.onlineBattle() || fb.sess.LocalOwner != 1 || fb.sess.Clock.GlobalTick != at {
+		t.Fatal("online playback did not become a local continuation at its boundary")
+	}
+	u := localCommanderOf(t, fb.sess)
+	if _, err := fb.submitHumanCommand(session.HumanCommand{Kind: session.HumanStop, Stop: session.HumanStopCommand{Handles: []pool.Handle{u.Handle}}}); err != nil {
+		t.Fatal(err)
+	}
+	for range 30 {
+		fork.step(1)
+	}
+	if fb.takeover.err != nil || fb.sess.Clock.GlobalTick != at+30 || fb.sess.LocalOwner != 1 || fp.Tick() != at {
+		t.Fatalf("online local continuation stalled: tick %d, error %v", fb.sess.Clock.GlobalTick, fb.takeover.err)
+	}
 }
 
 func mapsEqual(a, b map[uint32][32]byte) bool {
@@ -642,7 +669,7 @@ func TestReplayHeadlessRecordingPlaysInTheWindowRetail(t *testing.T) {
 	if p == nil || !b.onlineBattle() || b.replay != nil {
 		t.Fatal("the window did not open the replay as a playback")
 	}
-	if p.FinalTick() != 450 || len(p.Perspectives()) != 2 || !p.Perspectives()[1].FullMap || p.Perspective() != 0 {
+	if p.FinalTick() != 450 || len(p.Perspectives()) != 3 || p.Perspectives()[1].Seat != 1 || !p.Perspectives()[2].FullMap || p.Perspective() != 0 {
 		t.Fatalf("playback of %d ticks, perspectives %+v at %d", p.FinalTick(), p.Perspectives(), p.Perspective())
 	}
 	commander := localCommanderOf(t, b.sess)
@@ -663,7 +690,7 @@ func TestReplayHeadlessRecordingPlaysInTheWindowRetail(t *testing.T) {
 	if p.Tick() != held || !b.battleState().Paused() {
 		t.Fatal("a paused playback ran")
 	}
-	if err := p.SetPerspective(1); err != nil {
+	if err := p.SetPerspective(len(p.Perspectives()) - 1); err != nil {
 		t.Fatal(err)
 	}
 	w.step(1)

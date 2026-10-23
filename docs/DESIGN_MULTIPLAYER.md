@@ -1812,7 +1812,8 @@ through phase 1. The first checksum that differs ends the playback with
 the tick it diverged at. A playback runs as the recorded seat and takes no
 commands of its own; the simulation's local and viewing seats never move.
 Viewing is presentation only (`SetPresentationPerspective`): any recorded
-human seat's view, or the full map with fog off.
+human or computer seat's view, or the full map with fog off. The takeover
+prototype below explicitly ends playback before changing control.
 
 **Watching.** The main menu's REPLAYS button opens the Replays screen
 (DESIGN_INTERFACE_HUD_INPUT "Replays"). It lists the replay directory
@@ -1825,7 +1826,7 @@ mod first mounts that mod through the ordinary content reload, as an online
 join does, and a missing mod, a different copy of it or a missing map is
 named instead. Delete asks first. A playback takes no orders; its overlay
 and keys pause it, step its speed from ¼× to 8×, skip ahead a minute at a
-time, cycle the recorded human seats' views and the full map, and return
+time, cycle the recorded human and computer seats' views and the full map, and return
 to the Replays screen. At the recording's end, or at the first checksum
 this build computes differently, it holds there with the end or
 divergence line.
@@ -1850,6 +1851,70 @@ silently accepting a different battle. Authored fixtures from the original
 v1 writer lock single-player Strict and Modern and online playback, and an
 original v2 recording locks pre-extension compatibility. Optional header
 and configuration fields are also tested through actual playback.
+
+### 10.1 Replay takeover prototype
+
+User-authorized 2026-10-22 as a worktree prototype. This is a local continuation
+of a recorded session in every gameplay mode, including Strict 3.1; it changes
+who supplies input, not the bound rule set. It is Nanolathe policy, not retail
+replay evidence. The retail reference's [08 "Replay"] establishes no retail
+replay implementation to reproduce.
+
+**Implementation findings (Established, this source revision).** `replay.Compose`
+builds an ordinary, complete session. `replay.Player.Step` advances whole pumps
+and checks recorded unit checksums. Thus the completed pump already holds the
+units, projectiles, construction, orders, scripts, random streams and computer
+controllers needed to continue. A retail-save round trip would lose transient
+state ([08 "What is not saved, and the fix-up order that rebuilds it"]). Online
+playback also retains its per-seat sensors and results; clearing its online
+state would change the battle's simulation contract.
+
+**Prototype contract.**
+
+- Take over the player selected with the replay's View control. Human and
+  computer players are offered. The full-map view, watchers, finally removed
+  or eliminated players and Survival's scenario attacker are not playable.
+- Fork only between completed pumps, with no playback error or checksum
+  divergence. A recording that stopped while the battle is still playable
+  can be continued, including the last complete pump of an incomplete file.
+  A completed battle is not resurrected.
+- Retain the existing world and its tick. Drop future recorded input and
+  detach the checksum verifier. Preserve both simulation RNG streams, resources,
+  allocation identities, existing unit orders and construction queues. New
+  command sequence numbers follow the recording's accepted positions so they
+  cannot alias existing tracked orders.
+- The chosen computer's controller is stopped and its pending think discarded;
+  every other computer keeps its existing controller. Other recorded humans
+  receive no more input and continue their current orders. No replacement AI
+  is constructed, no starting resources are granted, and no units are created.
+  The chosen player's manager and its weapon maintenance remain; its planner
+  runs the bound set's human path. The selected local identity is pinned so
+  later recorded human rows cannot replace it during the session's human scan.
+  Subsequent income uses ordinary human credits; prior stock and settlement
+  timing are retained.
+- Restore ordinary sight for the chosen player, clear the spectator selection
+  and command gestures, and load that player's faction HUD. Resume at normal
+  speed. Single-player continuations use the ordinary local clock and input;
+  online continuations retain online simulation, command admission and one-tick
+  pump boundaries but run locally, without connecting to a relay. Their existing
+  no-pause restriction remains. A promoted online computer gains its own human
+  result row and sensor perspective. The existing coverage and history remain;
+  borrowed contacts are dropped and ordinary sensor dues refill them. No extra
+  sensor pass runs at takeover, since it could write shared cloak deadlines.
+- The original file is read only. The continuation is not recorded into another
+  replay and does not count toward Survival bests. Reopen the original replay
+  to choose a different branch. Saving, loading and restarting are disabled for
+  every takeover: the retail save cannot preserve idle human seats or the online
+  kernel. Saving a continuation, replacing idle
+  human seats with computers, recording branches and switching seats again are
+  outside this prototype.
+
+**Verification.** Focused fixtures exercise pump-boundary branching, future-input
+removal, monotonically increasing command identities, AI shutdown and retention,
+RNG/resource preservation, player eligibility, online command admission and
+the restored view. Playback tests keep ordinary recordings unchanged; retail
+tests continue a real replay from human and computer seats. The window controls
+and faction HUD need visual inspection before handoff.
 
 ## 11. Seats over time
 

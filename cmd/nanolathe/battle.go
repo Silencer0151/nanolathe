@@ -41,6 +41,7 @@ type battleSession struct {
 	// unrecorded battle.
 	replay       *replayRecording
 	playback     *replayPlayback
+	takeover     *replayTakeover
 	survivalBest *survivalBestRun
 	// preview owns a silent, isolated Settings scene (interface design §3.17).
 	preview                                bool
@@ -1033,6 +1034,10 @@ func (b *battleSession) teardown(cl *client.Client) {
 	b.ended = true
 	b.playback.release()
 	b.playback = nil
+	if b.takeover != nil {
+		b.takeover.source.release()
+		b.takeover = nil
+	}
 	b.sess = nil
 	b.cat = nil
 	b.cam = nil
@@ -1183,6 +1188,7 @@ func (b *battleSession) viewerStep(delta float64, cl *client.Client) {
 	b.radialPointerOwned = false
 	b.pumpLocalMultiplayer(cl)
 	b.pumpReplayPlayback(cl)
+	b.pumpReplayTakeover(cl)
 	b.followExecutor(cl.Enhanced())
 	b.syncCameraControls()
 	b.syncStrategicIcons(cl)

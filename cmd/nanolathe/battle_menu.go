@@ -180,7 +180,11 @@ func (b *battleSession) activateBattleMenuButton(name string, cl *client.Client)
 		return
 	}
 	name = gui.CallbackName(name)
-	if b.onlineBattle() && (name == "SAVEGAME" || name == "LOADGAME" || name == "RESTART") {
+	if b.saveRestartUnavailable() && (name == "SAVEGAME" || name == "LOADGAME" || name == "RESTART") {
+		if b.takeover != nil {
+			b.onlineNotice("Saves, loads and restarts are unavailable in the replay takeover prototype")
+			return
+		}
 		if b.replayPlayback() != nil {
 			b.onlineNotice("Saves, loads and restarts are unavailable while watching a replay")
 			return
@@ -253,6 +257,10 @@ func (b *battleSession) activateBattleMenuButton(name string, cl *client.Client)
 // in the direction the ARMOPT button selected [07 R-FE-01 §7] [07 R-FE-01 §8].
 func (b *battleSession) openBattleSaveLoadScreen(mode saveLoadMode) {
 	if b == nil || b.shell == nil {
+		return
+	}
+	if b.takeover != nil {
+		b.onlineNotice("Saves and loads are unavailable in the replay takeover prototype")
 		return
 	}
 	if b.onlineBattle() {

@@ -47,8 +47,8 @@ const (
 	replaySkipChunk = 30
 )
 
-// replayPerspective is one view a playback offers: a recorded human seat's,
-// with that seat's fog, or the whole map without fog.
+// replayPerspective is one view a playback offers: a recorded human or
+// computer seat's coverage, or the whole map without fog.
 type replayPerspective struct {
 	Label   string
 	Seat    uint8
@@ -232,12 +232,15 @@ func newReplayPlayback(path string, data []byte, cs *contentSet, progress conten
 	}
 	p := &replayPlayback{path: path, header: h, sess: sess, player: player, speed: replayNormalSpeed, roomFS: roomFS}
 	for i, seat := range h.Seats {
-		if seat.Role != session.MatchRoleHuman {
+		if seat.Role != session.MatchRoleHuman && seat.Role != session.MatchRoleComputer {
 			continue
 		}
 		label := seat.Name
 		if label == "" {
 			label = fmt.Sprintf("Player %d", i+1)
+		}
+		if seat.Role == session.MatchRoleComputer {
+			label += " (computer)"
 		}
 		if uint8(i) == h.LocalSeat {
 			p.perspective = len(p.perspectives)

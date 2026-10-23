@@ -4999,7 +4999,9 @@ physical coordinates for input.
 It reads *Replay:* and the map; the elapsed and total game time (m:ss / m:ss),
 the speed (1/4x to 8x) and *Paused*, *Skipping to m:ss* or *Ended*; and
 *View:* with the player or *Full map*. Its buttons are Pause (Play while
-paused), Slower, Faster, Skip 1:00 (Stop skip during a skip), View and Exit.
+paused), Slower, Faster, Skip 1:00 (Stop skip during a skip), View, Exit and
+Take over. Take over is enabled only for a playable selected player, under
+[DESIGN_MULTIPLAYER §10.1](DESIGN_MULTIPLAYER.md#101-replay-takeover-prototype).
 A left press arms one and its release over the same button acts; a press
 elsewhere on the overlay is taken, so it never selects or orders through it.
 Hovering a button names it and its key. At its end, or where it stops, the
@@ -5012,8 +5014,9 @@ red for a divergence or a damaged recording.
 | `-` `_` / `+` `=` | slower / faster through the speeds |
 | `]` | skip ahead one minute of game time; during a skip, one minute more |
 | `[` | stop a skip where it is |
-| Home | the next view: each recorded human seat's, then the full map |
+| Home | the next view: each recorded human or computer seat's, then the full map |
 | Backspace | leave the playback for the Replays screen |
+| End | continue live as the viewed player, when playable |
 
 Pause and the speed keys are the single-player battle's (§3.6). A playback
 takes no pause or speed command, so they drive the playback, except the
@@ -5024,6 +5027,16 @@ paused playback can still skip when the menu is closed. Tab resumes a paused
 playback, as it resumes a paused battle (§5), and opens the menu on an
 ended one. Pause, speed, skip and view are the playback's host controls;
 nothing here reaches a tick.
+
+**Takeover prototype (user-authorized 2026-10-22).** Take over / End requests
+a handoff before the next pump. It loads the selected faction's HUD first; a
+failure leaves playback paused with the reason. Success removes the playback
+controls, clears spectator interaction, restores normal fog and starts at 1×,
+unpaused. A small *Replay takeover: Player* label stays visible. Human and
+computer seats can be chosen; full-map view and eliminated or scenario-only
+seats cannot. The normal battle exit remains available. Saves, loads, restarts
+and new replay recording are unavailable in this prototype. Other computers
+continue; other humans finish existing orders without new input.
 
 ### 3.17 The Nanolathe screen
 

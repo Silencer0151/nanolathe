@@ -54,14 +54,14 @@ func (g *gameShell) slotSaveDir() string {
 
 // autosaveAllowed reports whether a battle is live and the host selected a
 // save directory: the battle is not ended, its result has not latched, and it
-// is neither an online battle nor a replay's playback. A Survival battle
+// is neither an online battle nor a replay playback or takeover. A Survival battle
 // saves its director in the sidecar (DESIGN_SURVIVAL §11).
 func (g *gameShell) autosaveAllowed() bool {
 	if g.slotSaveDir() == "" || g.battle == nil {
 		return false
 	}
 	b := g.battle
-	if b.sess == nil || b.ended || b.onlineBattle() {
+	if b.sess == nil || b.ended || b.saveRestartUnavailable() {
 		return false
 	}
 	if cur, ok := b.currentSnapshot(); ok && cur.Result.Ended {
@@ -165,6 +165,9 @@ func (g *gameShell) quicksave() {
 	switch {
 	case g.battle == nil:
 		return
+	case g.battle.takeover != nil:
+		g.saveNotice("Saving is unavailable in the replay takeover prototype")
+		return
 	case g.battle.onlineBattle():
 		g.saveNotice("Saves and loads are unavailable in multiplayer games")
 		return
@@ -184,6 +187,10 @@ func (g *gameShell) quicksave() {
 
 func (g *gameShell) quickload() {
 	if g.battle == nil {
+		return
+	}
+	if g.battle.takeover != nil {
+		g.saveNotice("Loading is unavailable in the replay takeover prototype")
 		return
 	}
 	if g.battle.onlineBattle() {
