@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/hex"
 	"fmt"
 	"strings"
 
@@ -8,6 +9,8 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/clock"
 	"github.com/nanolathe-gg/nanolathe/internal/frame"
 	"github.com/nanolathe-gg/nanolathe/internal/input"
+	"github.com/nanolathe-gg/nanolathe/internal/replay"
+	"github.com/nanolathe-gg/nanolathe/internal/save"
 	"github.com/nanolathe-gg/nanolathe/internal/session"
 )
 
@@ -67,10 +70,21 @@ func (b *battleSession) takeOverReplay(v replayPerspective, cl *client.Client) e
 	if err != nil {
 		return err
 	}
+	var origin *save.SidecarOnlineReplay
+	if b.sess.OnlineCommandContext() {
+		// Read before the handoff, which keeps no copy of the room.
+		if origin, err = onlineReplayRecord(p.header); err != nil {
+			return err
+		}
+	}
 	position, err := p.player.TakeOver(v.Seat)
 	if err != nil {
 		return err
 	}
+	if origin != nil {
+		origin.Difficulty = sidecarSeatDifficulties(b.sess.SeatDifficulties())
+	}
+	b.onlineOrigin = origin
 	label := strings.TrimSuffix(v.Label, " (computer)")
 	b.takeover = &replayTakeover{source: p, position: position, owner: v.Seat}
 	b.playback, b.survivalBest = nil, nil
@@ -118,11 +132,7 @@ func (b *battleSession) takeOverReplay(v replayPerspective, cl *client.Client) e
 		cl.PrepareBattlePresentation()
 	}
 	b.syncLocalInterface()
-	notice := "Now playing as " + label
-	if b.onlineBattle() {
-		notice += ". Saving is unavailable when continuing an online replay"
-	}
-	b.onlineNotice(notice)
+	b.onlineNotice("Now playing as " + label)
 	return nil
 }
 
@@ -180,22 +190,52 @@ func (b *battleSession) submitReplayTakeover(c session.HumanCommand) (uint64, er
 
 // takeoverRefusal is why a replay continuation refuses a save, load or
 // restart, or "" when it allows it or the battle is not a continuation. A
-// continued single-player replay saves and loads like any single-player
-// battle; a continued online replay keeps the online battle's rules, which no
-// save records, but may still be left for a loaded game. No continuation
-// restarts: a restart enters the recorded setup afresh, with the recorded
-// seat, not this one (DESIGN_MULTIPLAYER §10.1).
+// continuation saves and loads as an offline skirmish, one continued from an
+// online replay included (onlineOrigin). No continuation restarts: a restart
+// enters the recorded setup afresh, with the recorded seat, not this one
+// (DESIGN_MULTIPLAYER §10.1).
 func (b *battleSession) takeoverRefusal(action string) string {
-	if b == nil || b.takeover == nil {
+	if b == nil || b.takeover == nil || action != "RESTART" {
 		return ""
 	}
-	switch {
-	case action == "RESTART":
-		return "Restart is unavailable when continuing a replay"
-	case action == "SAVEGAME" && b.onlineBattle():
-		return "Saving is unavailable when continuing an online replay"
+	return "Restart is unavailable when continuing a replay"
+}
+
+// onlineReplayRecord starts the record an offline save of a continued online
+// replay carries (DESIGN_MULTIPLAYER §10.1): the room content the battle runs
+// on and whether the room's teams shared sight. The computers' difficulties
+// are the session's, after the handoff.
+func onlineReplayRecord(h replay.Header) (*save.SidecarOnlineReplay, error) {
+	config, err := h.Configuration()
+	if err != nil {
+		return nil, err
 	}
-	return ""
+	r := config.Request()
+	out := &save.SidecarOnlineReplay{SharedSight: r.SessionKind == session.MatchOnlineSkirmish && r.AlliedSight.Shared(true)}
+	for _, e := range r.RoomContent {
+		out.Content = append(out.Content, save.SidecarRoomContent{Kind: uint8(e.Kind), Name: e.Name, Version: e.Version, Size: e.Size, SHA256: hex.EncodeToString(e.Digest[:])})
+	}
+	return out, nil
+}
+
+func sidecarSeatDifficulties(seats []session.SeatDifficulty) []save.SidecarSeatDifficulty {
+	var out []save.SidecarSeatDifficulty
+	for _, d := range seats {
+		out = append(out, save.SidecarSeatDifficulty{Player: d.Player, Difficulty: d.Difficulty})
+	}
+	return out
+}
+
+// roomContentOf is a continued online replay's recorded room content as
+// the mount reads it (mountRoomContent).
+func roomContentOf(r *save.SidecarOnlineReplay) []session.MatchContentEntry {
+	out := make([]session.MatchContentEntry, 0, len(r.Content))
+	for _, c := range r.Content {
+		e := session.MatchContentEntry{Kind: session.MatchContentKind(c.Kind), Name: c.Name, Version: c.Version, Size: c.Size}
+		_, _ = hex.Decode(e.Digest[:], []byte(c.SHA256)) // the sidecar reader checked its length
+		out = append(out, e)
+	}
+	return out
 }
 
 // multiplayerPersistence reports a battle whose saves and loads the

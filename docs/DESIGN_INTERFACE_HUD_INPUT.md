@@ -5036,11 +5036,9 @@ go and the battle continues as the viewed player with that side's interface,
 the selection made while watching (less any unit that player does not own),
 the camera where it was and ordinary fog, at 1×, unpaused, with *Now playing
 as* and the player's name on the message lines. From then on the battle
-takes the ordinary keys, pause and menu, including Save and Load for a
-continued single-player replay; Restart is refused (*Restart is unavailable
-when continuing a replay*), and a continued online replay refuses Save
-(*Saving is unavailable when continuing an online replay*) and keeps normal
-speed. Should a continued online replay stop on an error, *Replay
+takes the ordinary keys, pause and menu, Save and Load included; Restart
+is refused (*Restart is unavailable when continuing a replay*), and a
+continued online replay keeps normal speed until a save of it is loaded. Should a continued online replay stop on an error, *Replay
 continuation stopped* stands where the overlay was. The rules are
 DESIGN_MULTIPLAYER §10.1's.
 

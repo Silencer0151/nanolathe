@@ -5,6 +5,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"errors"
 	"io"
 	"os"
@@ -22,6 +23,7 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/pool"
 	"github.com/nanolathe-gg/nanolathe/internal/relay"
 	"github.com/nanolathe-gg/nanolathe/internal/replay"
+	"github.com/nanolathe-gg/nanolathe/internal/save"
 	"github.com/nanolathe-gg/nanolathe/internal/session"
 	"github.com/nanolathe-gg/nanolathe/internal/settings"
 	"github.com/nanolathe-gg/nanolathe/internal/sim/numeric"
@@ -514,14 +516,14 @@ func TestReplayOnlineSeatsRecordTheSameStreamRetail(t *testing.T) {
 	if fb.takeover.err != nil || fb.sess.Clock.GlobalTick != at+30 || fb.sess.LocalOwner != 1 || fp.Tick() != at || !fb.sess.ModernAIPlayer(0) {
 		t.Fatalf("online local continuation stalled: tick %d, error %v", fb.sess.Clock.GlobalTick, fb.takeover.err)
 	}
-	// It runs on this machine alone, so it pauses, but it does not save.
+	// It runs on this machine alone, so it pauses.
 	fb.applyBattleSchedule(ui.BattleScheduleIntent{PauseSet: true, Pause: true})
 	held := fb.sess.Clock.GlobalTick
 	for range 10 {
 		fork.step(1)
 	}
-	if fb.sess.Clock.GlobalTick != held || !fb.battleState().Paused() || fb.takeoverRefusal("SAVEGAME") == "" || fb.takeoverRefusal("LOADGAME") != "" {
-		t.Fatal("the online continuation did not pause, or offered a save")
+	if fb.sess.Clock.GlobalTick != held || !fb.battleState().Paused() || fb.onlineOrigin == nil {
+		t.Fatal("the online continuation did not pause, or lost its online origin")
 	}
 	fb.applyBattleSchedule(ui.BattleScheduleIntent{PauseSet: true, Pause: false})
 	for range 10 {
@@ -529,6 +531,53 @@ func TestReplayOnlineSeatsRecordTheSameStreamRetail(t *testing.T) {
 	}
 	if fb.sess.Clock.GlobalTick != held+10 {
 		t.Fatalf("the online continuation did not resume: tick %d after %d", fb.sess.Clock.GlobalTick, held)
+	}
+	// It saves as an offline skirmish, its record beside the bank, and loads
+	// as one: the chosen seat local, the other recorded human still the
+	// Modern AI's, every unit kept.
+	fork.shell.opts.SaveDir = t.TempDir()
+	if !fork.shell.autosaveAllowed() {
+		t.Fatal("the online continuation refuses saves")
+	}
+	live := fb.sess.Units.LiveCountForPlayer(0) + fb.sess.Units.LiveCountForPlayer(1)
+	if err := fork.shell.writeSlotSave(quicksaveName); err != nil {
+		t.Fatal(err)
+	}
+	saved := session.RetailSavePath(fork.shell.slotSaveDir(), quicksaveName)
+	sc, ok, err := save.ReadSidecar(saved)
+	if err != nil || !ok || sc.Schema != save.SidecarSchemaOnlineReplay || sc.OnlineReplay == nil {
+		t.Fatalf("the online continuation's save carries no online replay record: %v", err)
+	}
+	// The play test's room names no content; name this install's, as a
+	// lobby room does, so the load mounts it (§16.8).
+	archives, err := baseArchives(cs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := onlineRoomContent(cs, archives, nil, "ashap plateau")
+	if err != nil || len(entries) == 0 {
+		t.Fatalf("no room content for this install: %v", err)
+	}
+	sc.OnlineReplay.Content = nil
+	for _, e := range entries {
+		sc.OnlineReplay.Content = append(sc.OnlineReplay.Content, save.SidecarRoomContent{Kind: uint8(e.Kind), Name: e.Name, Version: e.Version, Size: e.Size, SHA256: hex.EncodeToString(e.Digest[:])})
+	}
+	if err := save.WriteSidecar(saved, sc); err != nil {
+		t.Fatal(err)
+	}
+	if err := fork.shell.loadRetailSavePath(saved); err != nil {
+		t.Fatal(err)
+	}
+	lb := fork.shell.battle
+	if lb == nil || lb == fb || lb.onlineBattle() || lb.takeover != nil || lb.onlineOrigin == nil || lb.roomContent == nil || lb.sess.LocalOwner != 1 ||
+		!lb.sess.ModernAIPlayer(0) || lb.sess.Units.LiveCountForPlayer(0)+lb.sess.Units.LiveCountForPlayer(1) != live {
+		t.Fatal("the online continuation did not load as an offline skirmish of the chosen seat")
+	}
+	for range 30 {
+		fork.step(1)
+	}
+	if lb.sess.Clock.GlobalTick <= held+10 {
+		t.Fatal("the loaded online continuation does not run")
 	}
 }
 

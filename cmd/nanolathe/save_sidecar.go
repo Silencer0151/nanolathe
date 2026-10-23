@@ -85,6 +85,13 @@ func (g *gameShell) saveSidecar() save.Sidecar {
 	// A generated map's recipe, so the game loads after its memory mount is
 	// gone (docs/DESIGN_MAP_GENERATOR.md §10).
 	out.GeneratedMap = g.battleRecipe()
+	// A battle continued from an online replay ran on the room's content,
+	// which names its own add-ons; the record lets a load mount it again
+	// and keep the room's computers and team sight (DESIGN_MULTIPLAYER §10.1).
+	if g.battle != nil && g.battle.onlineOrigin != nil {
+		origin := *g.battle.onlineOrigin
+		out.OnlineReplay, out.Addons = &origin, nil
+	}
 	return out
 }
 

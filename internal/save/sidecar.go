@@ -2,6 +2,7 @@ package save
 
 import (
 	"bytes"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -56,6 +57,14 @@ const SidecarSchemaSurvival = 4
 // refuses it rather than loading the bank on whatever map has that name.
 const SidecarSchemaGeneratedMap = 5
 
+// SidecarSchemaOnlineReplay is the layout of a sidecar that records an
+// offline save of a continued online replay (docs/DESIGN_MULTIPLAYER.md
+// §10.1), with or without unit restrictions, official add-ons, a Survival
+// director and a generated map's recipe. A build that cannot mount the
+// room's content or restore its computers' difficulties refuses it rather
+// than loading the bank on other content.
+const SidecarSchemaOnlineReplay = 6
+
 // sidecarMaxBytes bounds ordinary selection records. A Survival director also
 // carries the whole planned wave and its history, so schema 4 has a larger
 // bounded allowance (DESIGN_MODS_MUTATORS §7.2). Writers enforce the same bound
@@ -64,7 +73,7 @@ const sidecarMaxBytes = 1 << 20
 const survivalSidecarMaxBytes = 16 << 20
 
 func sidecarByteLimit(schema int) int {
-	if schema == SidecarSchemaSurvival || schema == SidecarSchemaGeneratedMap {
+	if schema == SidecarSchemaSurvival || schema == SidecarSchemaGeneratedMap || schema == SidecarSchemaOnlineReplay {
 		return survivalSidecarMaxBytes
 	}
 	return sidecarMaxBytes
@@ -84,6 +93,35 @@ type SidecarAddon struct {
 	ID      string `json:"id"`
 	Version string `json:"version"`
 	SHA256  string `json:"sha256"`
+}
+
+// SidecarOnlineReplay is what an offline save of a continued online replay
+// records beyond an ordinary skirmish's sidecar (docs/DESIGN_MULTIPLAYER.md
+// §10.1): the room content the battle ran on, each computer seat's own
+// difficulty when the room's computers differed, and whether the room's teams
+// shared sight, which a load keeps in every gameplay mode.
+type SidecarOnlineReplay struct {
+	Content     []SidecarRoomContent    `json:"content,omitempty"`
+	Difficulty  []SidecarSeatDifficulty `json:"difficulty,omitempty"`
+	SharedSight bool                    `json:"sharedSight,omitempty"`
+}
+
+// SidecarRoomContent is one room content entry (DESIGN_MULTIPLAYER §16.8):
+// its kind (1 a base archive, 2 an official add-on, 3 a map package), name,
+// version, archive size and hex SHA-256.
+type SidecarRoomContent struct {
+	Kind    uint8  `json:"kind"`
+	Name    string `json:"name"`
+	Version string `json:"version,omitempty"`
+	Size    uint64 `json:"size"`
+	SHA256  string `json:"sha256"`
+}
+
+// SidecarSeatDifficulty is one computer seat's own difficulty word, 0 easy
+// to 2 hard.
+type SidecarSeatDifficulty struct {
+	Player     uint8 `json:"player"`
+	Difficulty int   `json:"difficulty"`
 }
 
 // SidecarModRef is the sidecar's `mod` value: null for no mod, an object
@@ -192,6 +230,10 @@ type Sidecar struct {
 	// on (docs/DESIGN_MAP_GENERATOR.md §10), raw like AI: the command owns
 	// its shape. Its presence makes the file schema 5.
 	GeneratedMap json.RawMessage `json:"generatedMap,omitempty"`
+	// OnlineReplay marks an offline save of a continued online replay and
+	// carries what its load needs beyond the other records. Its presence
+	// makes the file schema 6.
+	OnlineReplay *SidecarOnlineReplay `json:"onlineReplay,omitempty"`
 }
 
 // SidecarPath is the sidecar file of the bank at bankPath.
@@ -221,7 +263,13 @@ func WriteSidecar(bankPath string, s Sidecar) error {
 	if len(s.GeneratedMap) != 0 {
 		s.Schema = SidecarSchemaGeneratedMap
 	}
+	if s.OnlineReplay != nil {
+		s.Schema = SidecarSchemaOnlineReplay
+	}
 	if err := validateSurvivalSidecar(s); err != nil {
+		return sidecarError(SidecarPath(bankPath), err.Error())
+	}
+	if err := validateOnlineReplay(s.OnlineReplay); err != nil {
 		return sidecarError(SidecarPath(bankPath), err.Error())
 	}
 	if s.Mutators == nil {
@@ -314,21 +362,28 @@ func ReadSidecar(bankPath string) (Sidecar, bool, error) {
 		return Sidecar{}, false, sidecarError(path, "schema 1 with unit restrictions")
 	case s.Schema == SidecarSchemaRestrictions && len(s.Restrictions) == 0:
 		return Sidecar{}, false, sidecarError(path, "schema 2 without unit restrictions")
-	case s.Schema != SidecarSchemaAddons && s.Schema != SidecarSchemaSurvival && s.Schema != SidecarSchemaGeneratedMap && present.Addons != nil:
+	case s.Schema != SidecarSchemaAddons && s.Schema != SidecarSchemaSurvival && s.Schema != SidecarSchemaGeneratedMap && s.Schema != SidecarSchemaOnlineReplay && present.Addons != nil:
 		return Sidecar{}, false, sidecarError(path, fmt.Sprintf("schema %d with official add-ons", s.Schema))
 	case s.Schema == SidecarSchemaAddons && len(s.Addons) == 0:
 		return Sidecar{}, false, sidecarError(path, "schema 3 without official add-ons")
-	case s.Schema != SidecarSchemaGeneratedMap && len(s.GeneratedMap) != 0:
+	case s.Schema != SidecarSchemaGeneratedMap && s.Schema != SidecarSchemaOnlineReplay && len(s.GeneratedMap) != 0:
 		return Sidecar{}, false, sidecarError(path, fmt.Sprintf("schema %d with a generated map", s.Schema))
 	case s.Schema == SidecarSchemaGeneratedMap && (len(s.GeneratedMap) == 0 || bytes.Equal(bytes.TrimSpace(s.GeneratedMap), []byte("null"))):
 		return Sidecar{}, false, sidecarError(path, "schema 5 without a generated map")
-	case s.Schema != SidecarSchema && s.Schema != SidecarSchemaRestrictions && s.Schema != SidecarSchemaAddons && s.Schema != SidecarSchemaSurvival && s.Schema != SidecarSchemaGeneratedMap:
+	case s.Schema != SidecarSchemaOnlineReplay && s.OnlineReplay != nil:
+		return Sidecar{}, false, sidecarError(path, fmt.Sprintf("schema %d with a continued online replay", s.Schema))
+	case s.Schema == SidecarSchemaOnlineReplay && s.OnlineReplay == nil:
+		return Sidecar{}, false, sidecarError(path, "schema 6 without a continued online replay")
+	case s.Schema != SidecarSchema && s.Schema != SidecarSchemaRestrictions && s.Schema != SidecarSchemaAddons && s.Schema != SidecarSchemaSurvival && s.Schema != SidecarSchemaGeneratedMap && s.Schema != SidecarSchemaOnlineReplay:
 		return Sidecar{}, false, sidecarError(path, fmt.Sprintf("schema %d", s.Schema))
 	}
 	for _, a := range s.Addons {
 		if a.ID == "" || a.Version == "" || len(a.SHA256) != 64 {
 			return Sidecar{}, false, sidecarError(path, "an official add-on without an id, version and SHA-256")
 		}
+	}
+	if err := validateOnlineReplay(s.OnlineReplay); err != nil {
+		return Sidecar{}, false, sidecarError(path, err.Error())
 	}
 	return s, true, nil
 }
@@ -339,14 +394,36 @@ func ReadSidecar(bankPath string) (Sidecar, bool, error) {
 func validateSurvivalSidecar(s Sidecar) error {
 	null := bytes.Equal(bytes.TrimSpace(s.Survival), []byte("null"))
 	switch {
-	case s.Schema != SidecarSchemaSurvival && s.Schema != SidecarSchemaGeneratedMap && len(s.Survival) != 0:
+	case s.Schema != SidecarSchemaSurvival && s.Schema != SidecarSchemaGeneratedMap && s.Schema != SidecarSchemaOnlineReplay && len(s.Survival) != 0:
 		return fmt.Errorf("schema %d with a Survival director", s.Schema)
 	case s.Schema == SidecarSchemaSurvival && (len(s.Survival) == 0 || null):
 		return errors.New("schema 4 without a non-null Survival director")
-	case s.Schema == SidecarSchemaGeneratedMap && len(s.Survival) != 0 && null:
-		return errors.New("schema 5 with a null Survival director")
+	case (s.Schema == SidecarSchemaGeneratedMap || s.Schema == SidecarSchemaOnlineReplay) && len(s.Survival) != 0 && null:
+		return fmt.Errorf("schema %d with a null Survival director", s.Schema)
 	case len(s.Survival) == 0 && len(s.SurvivalBest) != 0:
 		return errors.New("survival best-score eligibility without a Survival director")
+	}
+	return nil
+}
+
+// validateOnlineReplay checks a continued online replay's record: every room
+// content entry names a known kind, a name and a SHA-256, and every seat
+// difficulty a player 0..9 and a word 0..2, each player once.
+func validateOnlineReplay(r *SidecarOnlineReplay) error {
+	if r == nil {
+		return nil
+	}
+	for _, c := range r.Content {
+		if _, err := hex.DecodeString(c.SHA256); c.Kind < 1 || c.Kind > 3 || c.Name == "" || len(c.SHA256) != 64 || err != nil {
+			return errors.New("a room content entry without a known kind, a name and a SHA-256")
+		}
+	}
+	var seen [10]bool
+	for _, d := range r.Difficulty {
+		if d.Player > 9 || d.Difficulty < 0 || d.Difficulty > 2 || seen[d.Player] {
+			return errors.New("a computer seat difficulty outside players 1 to 10 and words 0 to 2, or named twice")
+		}
+		seen[d.Player] = true
 	}
 	return nil
 }
@@ -362,5 +439,5 @@ func RemoveSidecar(bankPath string) error {
 }
 
 func sidecarError(path, what string) error {
-	return fmt.Errorf("nanolathe: save sidecar unreadable: %s: logical path %s, providers searched [save directory], expected a schema %d Nanolathe sidecar, schema %d with unit restrictions, schema %d with official add-ons, or schema %d with a Survival director", what, path, SidecarSchema, SidecarSchemaRestrictions, SidecarSchemaAddons, SidecarSchemaSurvival)
+	return fmt.Errorf("nanolathe: save sidecar unreadable: %s: logical path %s, providers searched [save directory], expected a schema %d Nanolathe sidecar, schema %d with unit restrictions, schema %d with official add-ons, schema %d with a Survival director, schema %d with a generated map or schema %d for a continued online replay", what, path, SidecarSchema, SidecarSchemaRestrictions, SidecarSchemaAddons, SidecarSchemaSurvival, SidecarSchemaGeneratedMap, SidecarSchemaOnlineReplay)
 }

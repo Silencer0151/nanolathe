@@ -167,7 +167,9 @@ mode: from a playback, continue the battle live as any recorded seat still
 playing, on the playback's own world, with the recording's other humans
 played by the Modern AI. A continued single-player replay saves, loads and
 pauses like any single-player battle; a continued online replay keeps the
-online simulation on this machine alone, pauses, and does not save
+online simulation on this machine alone and pauses, and saves and loads as an
+offline skirmish on the room's content, keeping its computers' own
+difficulties and, in every mode including Strict 3.1, its team sight
 (§10.1). Playback views show the viewed seat's own sight.
 
 **Unit restrictions are the fifth mode-independent exception (user-authorized

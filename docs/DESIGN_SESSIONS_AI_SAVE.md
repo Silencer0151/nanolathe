@@ -3481,7 +3481,10 @@ battle without it keeps its existing version-2 bytes. A save records it in the
 sidecar (`alliedSight`, DESIGN_MODS_MUTATORS §7.2): the bank keeps the
 alliance rows but not the ally groups `[08 R-SKIR-01 §2]` "Save
 persistence", so the load rebuilds the teams from the restored rows before
-the restored units publish coverage. A campaign takes none.
+the restored units publish coverage. A campaign takes none. The offline save
+of a continued online replay keeps its room's team sight in every mode,
+Strict 3.1 included, since the room shared it (user-authorized 2026-10-23,
+DESIGN_MULTIPLAYER §10.1).
 
 **Tests:** `TestAlliedSightTeamsFollowTheAllianceTable`,
 `TestAlliedSightIsRequiredExtension18`,

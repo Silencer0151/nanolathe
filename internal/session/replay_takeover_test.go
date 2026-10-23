@@ -1,6 +1,7 @@
 package session
 
 import (
+	"path/filepath"
 	"reflect"
 	"testing"
 
@@ -8,6 +9,7 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/gameplay"
 	"github.com/nanolathe-gg/nanolathe/internal/orders"
 	"github.com/nanolathe-gg/nanolathe/internal/pool"
+	"github.com/nanolathe-gg/nanolathe/internal/save"
 	"github.com/nanolathe-gg/nanolathe/internal/units"
 	"github.com/nanolathe-gg/nanolathe/internal/visibility"
 )
@@ -205,5 +207,87 @@ func TestOnlineReplayTakeoverPromotesComputerAndAcceptsLocalCommands(t *testing.
 	// No human plays on, so the local defeat ends the continuation.
 	if result := s.GetResult(); !result.Ended || result.Kind != "defeat" || !s.OnlineBattleEnded() {
 		t.Fatalf("the promoted player's defeat did not end the continuation: %+v", result)
+	}
+}
+
+// A continued online replay saves and loads as an offline skirmish of the
+// chosen seat (DESIGN_MULTIPLAYER §10.1). Under Strict 3.1, whose fresh
+// offline skirmishes keep sight separate and whose rooms host one computer
+// per human, the room's team sight survives the load; under Modern a room's
+// mixed computer difficulties do.
+func TestOnlineContinuationLoadsAsOfflineSkirmish(t *testing.T) {
+	for _, tc := range []struct {
+		mode      gameplay.Mode
+		computers int
+		chosen    uint8
+		seats     []SeatDifficulty
+	}{
+		{gameplay.Strict31, 1, 2, nil},
+		// Seat 2 is the room's hard Classic computer; seat 3, taken over, is
+		// no computer any more, and the recorded humans never had a word.
+		{gameplay.Modern, 2, 3, []SeatDifficulty{{Player: 2, Difficulty: 2}}},
+	} {
+		t.Run(string(tc.mode), func(t *testing.T) {
+			setup := onlineComputerTestSetup(false)
+			setup.Rules, setup.Computers = string(tc.mode), setup.Computers[:tc.computers]
+			inputs, config := onlineComputerFixtureMatch(t, setup)
+			s, err := NewPlaytestSkirmish(inputs, config, 0, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(s.closeAIControllers)
+			if err := s.PrepareGrantedBattle(); err != nil {
+				t.Fatal(err)
+			}
+			for tick := uint32(1); tick <= 30; tick++ {
+				if err := s.StepGranted(tick); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, err := s.TakeOverReplay(tc.chosen); err != nil {
+				t.Fatal(err)
+			}
+			seats := s.SeatDifficulties()
+			if !reflect.DeepEqual(seats, tc.seats) {
+				t.Fatalf("seat difficulties %+v, want %+v", seats, tc.seats)
+			}
+			summary := RetailBattleSummary(s, "continued", "0", s.Skirmish.UnitLimit)
+			in, err := s.RetailBattleSaveInputs(summary, save.Camera{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(t.TempDir(), "CONTINUED.SAV")
+			if err := s.WriteRetailSave(path, in); err != nil {
+				t.Fatal(err)
+			}
+			fs, cat := onlineComputerInstall(t)
+			for _, continued := range []bool{true, false} {
+				deps := RetailLoadDeps{FS: fs, Catalog: cat, SimSeed: 7, CRTSeed: 11, UnitLimit: s.Skirmish.UnitLimit, Gameplay: tc.mode,
+					AlliedSight: true, AIControllers: RecordAIControllers(s)}
+				if continued {
+					deps.ContinuedOnline, deps.SeatDifficulties = true, seats
+				}
+				loaded, err := LoadRetailSavePath(path, deps)
+				if err != nil {
+					t.Fatal(err)
+				}
+				dst := loaded.Battle.Session
+				t.Cleanup(dst.closeAIControllers)
+				if dst.onlineResults != nil || dst.OnlineCommandContext() || dst.LocalOwner != tc.chosen || !dst.ModernAIPlayer(0) || !dst.ModernAIPlayer(1) {
+					t.Fatal("the save did not load as an offline skirmish of the chosen seat")
+				}
+				if want := continued || tc.mode != gameplay.Strict31; dst.Skirmish.AlliedSight != want {
+					t.Fatalf("continued %v: allied sight %v, want %v", continued, dst.Skirmish.AlliedSight, want)
+				}
+				for _, seat := range tc.seats {
+					want, _ := sessionSeatDifficultyWord(s, seat.Player)
+					got, ok := sessionSeatDifficultyWord(dst, seat.Player)
+					if continued != (ok && got == want && dst.AI[seat.Player].Profile.Plan == s.AI[seat.Player].Profile.Plan) {
+						t.Fatalf("continued %v: seat %d difficulty %d (%v), plan %q, want %d, plan %q", continued, seat.Player, got, ok,
+							dst.AI[seat.Player].Profile.Plan, want, s.AI[seat.Player].Profile.Plan)
+					}
+				}
+			}
+		})
 	}
 }

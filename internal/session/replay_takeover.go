@@ -179,3 +179,24 @@ func modernAIRegistered() bool {
 	defer modernAIMu.Unlock()
 	return modernAIStep != nil
 }
+
+// SeatDifficulties lists, in slot order, the computer players that carry
+// their own difficulty word (SkirmishConfig.SeatDifficulty), for the offline
+// save of a continued online replay (DESIGN_MULTIPLAYER §10.1). A seat a
+// takeover gave to the local human is no longer a computer player and is
+// left out; a recorded human the Modern AI plays never had a word.
+func (s *Session) SeatDifficulties() []SeatDifficulty {
+	if s == nil || s.Econ == nil {
+		return nil
+	}
+	var out []SeatDifficulty
+	for i := range s.Econ.Players {
+		if s.Econ.Players[i].ControllerState != 2 {
+			continue
+		}
+		if index, ok := sessionSeatDifficultyIndex(s, uint8(i)); ok {
+			out = append(out, SeatDifficulty{Player: uint8(i), Difficulty: index})
+		}
+	}
+	return out
+}

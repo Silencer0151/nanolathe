@@ -1864,7 +1864,8 @@ and configuration fields are also tested through actual playback.
 **Policy.** A player watching a replay may take over any recorded seat that
 is still playing and continue the battle live from that moment, in every
 gameplay mode, Strict 3.1 included (user-authorized 2026-10-22; Modern AI
-opponents, saves and pause 2026-10-23). It changes who supplies input, never
+opponents, saves, pause and offline saves of online continuations
+2026-10-23). It changes who supplies input, never
 the bound rule set. It is Nanolathe policy: [08 "Replay"] establishes no
 retail replay to reproduce.
 
@@ -1916,11 +1917,28 @@ Its saves record the replay's configured unit limit and load as a battle of
 the chosen seat, its replaced humans still Modern. A continued online replay
 keeps the online battle's simulation and command admission, run on this
 machine one tick per host step with no relay. It pauses, since nobody else is
-connected, and may be left for a loaded game, but it keeps normal speed and
-does not save: no save records an online battle's rules. No continuation
-restarts (a restart enters the recorded setup afresh, as the recorded seat),
-records a replay of its own or counts toward Survival bests; a save of one
-carries no best-run record, so a loaded one is excluded too. The original
+connected, but keeps normal speed.
+
+*Saving a continued online replay.* It saves, autosaves and loads as an
+offline skirmish: the save holds no online rules, so a load builds the
+single-player battle the bank describes, with the local player's one sensor
+picture, one battle result and normal speed control. Its sidecar marks it
+(`onlineReplay`, DESIGN_MODS_MUTATORS §7.2) with what an ordinary skirmish
+save would lose:
+
+- the room content it ran on, which the load mounts as a playback does
+  (§16.8) and refuses, naming it, when this install lacks it;
+- each computer seat's own difficulty word when the room's computers
+  differed (§6.6), so they keep their plan, persona and credits; the seat
+  taken over and the humans the Modern AI plays have none;
+- whether the room's teams shared sight, which the load keeps in every mode,
+  Strict 3.1 included, as the room did.
+
+A save of the loaded battle carries the same record again.
+
+No continuation restarts (a restart enters the recorded setup afresh, as the
+recorded seat), records a replay of its own or counts toward Survival bests;
+a save of one carries no best-run record, so a loaded one is excluded too. The original
 file is never written; reopening it chooses another moment or seat. A
 continuation does not switch seats again.
 
@@ -1929,11 +1947,14 @@ handoff, dropped future input, command identities that follow the
 recording's, the chosen controller stopped, the other human handed to the
 Modern AI and paid in full, both random streams, resources and units
 unchanged, ineligible seats refused, online command admission, the converted
-seats' rows and the ending once no human plays on. Playback tests keep
+seats' rows and the ending once no human plays on, and an online
+continuation's offline save loading with its computers' own difficulties and,
+under Strict 3.1, its team sight. Playback tests keep
 ordinary recordings unchanged. Retail window tests continue a real replay
 from human and computer seats in every mode and Survival, carry over the
 selection and camera, save and load the continuation, and pause a continued
-online replay.
+online replay and save and load it as an offline skirmish on its room's
+content.
 
 ## 11. Seats over time
 

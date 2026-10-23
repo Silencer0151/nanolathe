@@ -24,6 +24,7 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/replay"
 	"github.com/nanolathe-gg/nanolathe/internal/session"
 	"github.com/nanolathe-gg/nanolathe/internal/units"
+	"github.com/nanolathe-gg/nanolathe/vfs"
 )
 
 // replaySpeed is one playback speed: Quarters quarter ticks per host step,
@@ -146,21 +147,32 @@ func replayContent(cs *contentSet, h replay.Header, progress content.Progress) (
 		// An undecodable configuration is replay.Compose's refusal to name.
 		return c, nil, nil
 	}
-	entries := config.Request().RoomContent
-	archives, err := baseArchives(cs)
-	if err != nil {
-		return c, nil, err
-	}
-	plan := resolveRoomContent(cs, archives, installedMapPackages(), libraryAddonsOf(), entries)
-	if len(plan.missing) > 0 {
-		return c, nil, &roomContentMissingError{missing: plan.missing}
-	}
-	mounted, view, err := roomContentFS(cs, plan)
+	mounted, view, err := mountRoomContent(cs, config.Request().RoomContent)
 	if err != nil {
 		return c, nil, err
 	}
 	c.FS = view
 	return c, mounted, nil
+}
+
+// mountRoomContent mounts a recorded room's content from this install, as
+// the room named it (DESIGN_MULTIPLAYER §16.8): for a playback, and for the
+// load of a continued online replay's offline save (§10.1). Content this
+// install lacks is a *roomContentMissingError. The closer releases the mount.
+func mountRoomContent(cs *contentSet, entries []session.MatchContentEntry) (io.Closer, vfs.FSOps, error) {
+	archives, err := baseArchives(cs)
+	if err != nil {
+		return nil, nil, err
+	}
+	plan := resolveRoomContent(cs, archives, installedMapPackages(), libraryAddonsOf(), entries)
+	if len(plan.missing) > 0 {
+		return nil, nil, &roomContentMissingError{missing: plan.missing}
+	}
+	mounted, view, err := roomContentFS(cs, plan)
+	if err != nil {
+		return nil, nil, err
+	}
+	return mounted, view, nil
 }
 
 // roomContentMissingError is a recorded room's content this install lacks.
