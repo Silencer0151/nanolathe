@@ -6105,7 +6105,7 @@ TLS, so the relay also speaks WebSocket for the same hosted hello, rooms,
 commands, grants and acknowledgements; nothing about the simulation,
 command schema, pacing or admission changes. Sources:
 [App Platform routing](https://docs.digitalocean.com/products/app-platform/how-to/manage-internal-routing/),
-[deployment limits](https://docs.digitalocean.com/products/app-platform/details/limits/)
+[deployment limits](https://docs.digitalocean.com/products/app-platform/details/limits/),
 [WebSocket RFC 6455](https://www.rfc-editor.org/rfc/rfc6455) and
 [Cloudflare error diagnostic headers](https://developers.cloudflare.com/support/troubleshooting/http-status-codes/cloudflare-error-headers/).
 
@@ -6135,10 +6135,9 @@ client accepts `wss://host/relay` and refuses credentials, fragments,
 queries and other paths; `ws://` needs the numeric-loopback test switch.
 Certificate verification is always on. A rejected native upgrade reports the
 HTTP status and which validation failed. It includes only quoted diagnostic
-headers, truncated after 128 bytes per value
-(Date, Server, Cf-Ray, Cf-Mitigated, Cf-Error-Type,
-Cf-Error-Origin and X-Do-Orig-Status); cookies, arbitrary headers and response
-bodies are omitted. The parsed response is a `relay.WebSocketHandshakeError`
+headers, truncated after 128 bytes per value: Date, Server, Cf-Ray,
+Cf-Mitigated, Cf-Error-Type, Cf-Error-Origin and X-Do-Orig-Status. Cookies,
+arbitrary headers and response bodies are omitted. The parsed response is a `relay.WebSocketHandshakeError`
 whose `StatusCode` distinguishes an HTTP refusal from an invalid 101 upgrade.
 
 **Deployment.** `deploy/relay` is exported as a reproducible source snapshot
