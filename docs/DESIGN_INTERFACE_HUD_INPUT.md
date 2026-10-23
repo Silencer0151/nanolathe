@@ -5000,8 +5000,9 @@ It reads *Replay:* and the map; the elapsed and total game time (m:ss / m:ss),
 the speed (1/4x to 8x) and *Paused*, *Skipping to m:ss* or *Ended*; and
 *View:* with the player or *Full map*. Its buttons are Pause (Play while
 paused), Slower, Faster, Skip 1:00 (Stop skip during a skip), View, Exit and
-Take over. Take over is enabled only for a playable selected player, under
-[DESIGN_MULTIPLAYER §10.1](DESIGN_MULTIPLAYER.md#101-replay-takeover-prototype).
+Take over. Take over is enabled only while the view shows a seat that can be
+taken over, under
+[DESIGN_MULTIPLAYER §10.1](DESIGN_MULTIPLAYER.md#101-replay-takeover).
 A left press arms one and its release over the same button acts; a press
 elsewhere on the overlay is taken, so it never selects or orders through it.
 Hovering a button names it and its key. At its end, or where it stops, the
@@ -5028,15 +5029,20 @@ playback, as it resumes a paused battle (§5), and opens the menu on an
 ended one. Pause, speed, skip and view are the playback's host controls;
 nothing here reaches a tick.
 
-**Takeover prototype (user-authorized 2026-10-22).** Take over / End requests
-a handoff before the next pump. It loads the selected faction's HUD first; a
-failure leaves playback paused with the reason. Success removes the playback
-controls, clears spectator interaction, restores normal fog and starts at 1×,
-unpaused. A small *Replay takeover: Player* label stays visible. Human and
-computer seats can be chosen; full-map view and eliminated or scenario-only
-seats cannot. The normal battle exit remains available. Saves, loads, restarts
-and new replay recording are unavailable in this prototype. Other computers
-continue; other humans finish existing orders without new input.
+**Taking over.** Take over or End asks for the handoff before the next pump.
+The chosen side's interface loads first; a failure leaves the playback
+paused with the reason under the buttons. Otherwise the overlay and its keys
+go and the battle continues as the viewed player with that side's interface,
+the selection made while watching (less any unit that player does not own),
+the camera where it was and ordinary fog, at 1×, unpaused, with *Now playing
+as* and the player's name on the message lines. From then on the battle
+takes the ordinary keys, pause and menu, including Save and Load for a
+continued single-player replay; Restart is refused (*Restart is unavailable
+when continuing a replay*), and a continued online replay refuses Save
+(*Saving is unavailable when continuing an online replay*) and keeps normal
+speed. Should a continued online replay stop on an error, *Replay
+continuation stopped* stands where the overlay was. The rules are
+DESIGN_MULTIPLAYER §10.1's.
 
 ### 3.17 The Nanolathe screen
 
