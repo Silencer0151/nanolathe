@@ -250,7 +250,10 @@ func (s *Session) publishFrame(tick uint32, paused bool) {
 	// other channels are built while it runs (publish_parallel.go).
 	var channel *unitChannel
 	if s.Units != nil {
-		channel = s.startUnitChannel(published, viewer, reveal)
+		// A playback drawing another single-player viewer derives that
+		// viewer's sensor bank first; the workers read it (replay_view.go).
+		bank := s.perspectiveSensorBank(viewer)
+		channel = s.startUnitChannel(published, viewer, reveal, bank)
 		// A panic that unwinds the publication early still joins the workers
 		// before the frame slot can be written again; after the ordinary
 		// join below this is a no-op.
@@ -288,7 +291,11 @@ func (s *Session) publishFrame(tick uint32, paused bool) {
 		// Step 3 of the gate compares against the scaled sea-level byte, never
 		// against zero [03 §3.2][03 §2.2].
 		published.Visibility.SeaLevel = publishedSeaLevel(s.World)
-		if fc := s.Vis.Fog(); fc != nil {
+		if viewer != s.ViewingOwner && !reveal {
+			// The fog cache is the viewing owner's; another viewer's fog is
+			// derived for it beside the cache (replay_view.go).
+			s.publishPerspectiveFog(published, viewer)
+		} else if fc := s.Vis.Fog(); fc != nil {
 			version := s.Vis.FogVersion()
 			source := s.Vis.PresentationIdentity()
 			if !published.RestoreFog(source, version) {
@@ -305,7 +312,7 @@ func (s *Session) publishFrame(tick uint32, paused bool) {
 			}
 			published.Fog.Valid = s.Vis.FogCacheValid()
 		}
-		s.publishPerspectiveView(published, viewer, reveal)
+		s.publishPerspectiveView(published, reveal)
 	} else {
 		published.Visibility = frame.VisibilityView{}
 		published.Fog = frame.FogView{}
