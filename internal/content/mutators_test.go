@@ -685,6 +685,11 @@ func TestMutatedCatalogIdentity(t *testing.T) {
 	if all.Digest() == HashDefinition([]byte("mutators/1\n"+all.String()+"\n")) || all.Digest() == (Mutators{}).Digest() {
 		t.Fatal("digest must carry the current identity tag and follow the set")
 	}
+	// MutatedHash names the identity ApplyMutators gives, and the zero set
+	// leaves the base, so a load can compute a save's recorded identity.
+	if MutatedHash(base.Hash, all) != apply(all) || MutatedHash(base.Hash, Mutators{}) != base.Hash {
+		t.Fatal("MutatedHash must be the identity ApplyMutators gives")
+	}
 }
 
 // TestParseMutatorsRoundTrip walks every key through every step via Map,

@@ -967,10 +967,21 @@ func (c *Catalog) ApplyMutators(m Mutators) error {
 			}
 		}
 	}
-	// The mutated identity composes the base identity with the set's digest,
-	// which hashes the identity tag and the canonical String (§6.6).
-	c.Hash = HashDefinition([]byte("catalog+mutators\n" + c.Hash + "\n" + m.Digest() + "\n"))
+	c.Hash = MutatedHash(c.Hash, m)
 	return nil
+}
+
+// MutatedHash is the identity ApplyMutators gives a catalog whose identity is
+// base: base itself for the zero set, otherwise the base identity composed
+// with the set's digest, which hashes the identity tag and the canonical
+// String (§6.6). A save load compares a save's recorded identity with the one
+// its recorded set gives the restored content, when Smart makers runs as the
+// player selects rather than as recorded (docs/DESIGN_MODS_MUTATORS.md §7.3).
+func MutatedHash(base string, m Mutators) string {
+	if m.IsZero() {
+		return base
+	}
+	return HashDefinition([]byte("catalog+mutators\n" + base + "\n" + m.Digest() + "\n"))
 }
 
 // scaleMotion applies Unit speed k_u and Builder speed k_b to one unit's
