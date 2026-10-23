@@ -11,9 +11,6 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/pool"
 	"github.com/nanolathe-gg/nanolathe/internal/replay"
 	"github.com/nanolathe-gg/nanolathe/internal/session"
-	// A takeover hands the recording's other humans to the Modern AI
-	// (DESIGN_MULTIPLAYER §10.1), so this test binary links it.
-	_ "github.com/nanolathe-gg/nanolathe/mods/aikit"
 )
 
 // A completed pump is a usable live world even when the original input

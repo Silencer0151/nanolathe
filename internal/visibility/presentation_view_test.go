@@ -218,7 +218,6 @@ func TestSensorTickForPresentationIsThatViewersPass(t *testing.T) {
 		id      uint16
 		serial  uint64
 		owner   PlayerID
-		x, z    int64
 		radar   int32
 		jam     int32
 		cloak   bool
