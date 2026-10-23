@@ -148,12 +148,12 @@ func TestCheckpointModernBindingsVectorsAndPurity(t *testing.T) {
 		if err := f.register(); err != nil {
 			t.Fatal(err)
 		}
-		// Independent 458-byte empty manager layout: Controller at 150,
-		// Ext at 195, table-1 Factory ref at 196, Planner at 262.
-		want := make([]byte, 458)
-		want[150], want[196], want[262] = 1, 1, 3
+		// Independent 459-byte empty manager layout: Controller at 151,
+		// Ext at 196, table-1 Factory ref at 197, Planner at 263.
+		want := make([]byte, 459)
+		want[151], want[197], want[263] = 1, 1, 3
 		if present {
-			want[195] = 1
+			want[196] = 1
 		}
 		if got := aiCheckpointBytes(t, f.m, f.c); !bytes.Equal(got, want) {
 			t.Fatalf("present %v manager vector\ngot  %x\nwant %x", present, got, want)

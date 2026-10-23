@@ -61,6 +61,7 @@ type Overrides struct {
 	MapFeatureOwnerEleven    *bool `json:"mapFeatureOwnerEleven,omitempty"`
 	ResurrectionTextFix      *bool `json:"resurrectionTextFix,omitempty"`
 	HealTimeBitmask          *bool `json:"healTimeBitmask,omitempty"`
+	AIDifficultyReversed     *bool `json:"aiDifficultyReversed,omitempty"`
 	AIBuilderPlacementLimit  *int  `json:"aiBuilderPlacementLimit,omitempty"`
 
 	RepairRate                *RepairRateOverrides `json:"repairRate,omitempty"`
@@ -174,6 +175,7 @@ func apply(base Features, o Overrides, logicalPath string) (Features, error) {
 	applyBool(&base.MapFeatureOwnerEleven, o.MapFeatureOwnerEleven)
 	applyBool(&base.ResurrectionTextFix, o.ResurrectionTextFix)
 	applyBool(&base.HealTimeBitmask, o.HealTimeBitmask)
+	applyBool(&base.AIDifficultyReversed, o.AIDifficultyReversed)
 	applyInt(&base.AIBuilderPlacementLimit, o.AIBuilderPlacementLimit)
 
 	if o.RepairRate != nil {
@@ -340,6 +342,8 @@ func boolField(o *Overrides, name string) **bool {
 	switch name {
 	case "healTimeBitmask":
 		return &o.HealTimeBitmask
+	case "aiDifficultyReversed":
+		return &o.AIDifficultyReversed
 	case "constructionKickout":
 		return &o.ConstructionKickout
 	case "guardingBuildersHold":

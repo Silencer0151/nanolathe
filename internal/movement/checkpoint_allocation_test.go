@@ -207,9 +207,9 @@ func TestMovementCheckpointAirBaseRowsVectorAndErrors(t *testing.T) {
 	collectMovementCheckpoint(t, s, c)
 	write := func(e *checkpoint.Encoder) { _ = s.WriteCheckpoint(e, c) }
 	got := movementCheckpointWrite(t, write)
-	// The existing System vector has 206 bytes before the ten air-base rows.
+	// The existing System vector has 207 bytes before the ten air-base rows.
 	// Empty rows are ten u32 counts; each authored row adds one u32 handle.
-	const prefix, emptyRows = 206, 40
+	const prefix, emptyRows = 207, 40
 	wantRows := movementCheckpointVector(t, rows)
 	if len(got) != len(empty)+emptyRows || !bytes.Equal(got[:prefix], empty[:prefix]) ||
 		!bytes.Equal(got[prefix:prefix+len(wantRows)], wantRows) ||
@@ -230,7 +230,7 @@ func TestMovementCheckpointIndexedSystemVectorAndErrors(t *testing.T) {
 	write := func(e *checkpoint.Encoder) { _ = s.WriteCheckpoint(e, c) }
 	got := movementCheckpointWrite(t, write)
 	want := movementCheckpointVector(t,
-		uint8(0), uint8(0), uint32(0), [143]uint8{}, uint8(0), [16]uint8{}, uint32(0), uint8(0), uint8(1), int64(0), int32(0), uint16(6), uint32(0), uint8(0),
+		uint8(0), uint8(0), uint32(0), [144]uint8{}, uint8(0), [16]uint8{}, uint32(0), uint8(0), uint8(1), int64(0), int32(0), uint16(6), uint32(0), uint8(0),
 		uint32(0), uint8(0), uint8(0), uint32(0), uint8(0), uint32(0), [10]uint32{}, uint8(0), uint32(0), uint32(0),
 		uint32(0), uint32(0), uint8(0), uint8(0), uint32(2), uint16(11), uint32(0), uint16(11), uint32(0),
 		uint64(0), uint8(0), uint32(0), uint32(0), uint32(0), int64(0), uint32(0), uint32(0), uint32(0),
@@ -244,21 +244,21 @@ func TestMovementCheckpointIndexedSystemVectorAndErrors(t *testing.T) {
 		offset int
 		path   string
 	}{
-		{269, "movement.moveGoals[0]"},
-		{271, "movement.moveGoals[0]"},
-		{275, "movement.moveGoals[1]"},
-		{326, "movement.profileNames[0]"},
-		{330, "movement.profileNames[1]"},
-		{334, "movement.profileNames[1]"},
-		{343, "movement.recordGoals[0]"},
-		{347, "movement.recordGoals[1]"},
+		{270, "movement.moveGoals[0]"},
+		{272, "movement.moveGoals[0]"},
+		{276, "movement.moveGoals[1]"},
+		{327, "movement.profileNames[0]"},
+		{331, "movement.profileNames[1]"},
+		{335, "movement.profileNames[1]"},
+		{344, "movement.recordGoals[0]"},
+		{348, "movement.recordGoals[1]"},
 	} {
 		assertMovementCheckpointOffsetError(t, write, tc.offset, tc.path)
 	}
 	// Present payloads still use the original nested row path.
 	s.recordGoals[1] = []recordGoal{{}}
-	assertMovementCheckpointOffsetError(t, write, 351, "movement.recordGoals[1][0].air")
-	assertMovementCheckpointOffsetError(t, write, 357, "movement.recordGoals[1][0].ground")
+	assertMovementCheckpointOffsetError(t, write, 352, "movement.recordGoals[1][0].air")
+	assertMovementCheckpointOffsetError(t, write, 358, "movement.recordGoals[1][0].ground")
 	// A reference refusal must retain the same indexed path even without a
 	// sink failure, and writing must not silently discover the missing object.
 	s.moveGoals[1] = &moveGoal{}

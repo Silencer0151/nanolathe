@@ -49,10 +49,10 @@ func TestCheckpointRulesKind(t *testing.T) {
 func TestCheckpointRulesOwnerTags(t *testing.T) {
 	s := &System{}
 	baseline := movementCheckpointBytes(t, s)
-	// Two bindings, empty Collisions, Community (143), Damage, Profile
+	// Two bindings, empty Collisions, Community (144), Damage, Profile
 	// (16), empty Flights, Grid, Kernel, path limits, pilot ref, product
 	// binding and empty Routes.
-	const ruleOffset = 195
+	const ruleOffset = 196
 	if baseline[ruleOffset] != 0 {
 		t.Fatal("nil rules lost their zero tag")
 	}

@@ -632,7 +632,7 @@ func (c *Client) buildUnitDraw(v frame.UnitView, deferred bool) (*presentationre
 	// Digger selects its silhouette branch before the structure/mobile split;
 	// even a structure-class Digger must pass the vehicle gates [R-REN-03D §1].
 	draw.CastsShadow = c.castsModelShadow(v.NoShadow, v.CanHover, v.Floater, draw.Structure && !v.Digger)
-	draw.GroundY = c.groundHeightUnder(v.X, v.Z)
+	draw.GroundY = c.unitShadowGroundHeight(v.X, v.Z, v.MoverMode == 2)
 	draw.Airborne = c.enhanced && v.MoverMode == 2
 	draw.DiggerClip = v.Digger
 	if v.Digger {

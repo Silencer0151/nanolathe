@@ -1259,6 +1259,48 @@ Run the movement/order/airdiag contracts, both repository gates and the
 displayless simulation-cost benchmark. Ground path search and its policies
 are unchanged; this queue never submits a path request.
 
+### Modern construction aircraft patrol recovery
+
+**Nanolathe Modern policy** (issue #152, user-authorized 2026-10-23).
+`movement.Rules.AirPatrolRecovery` repairs the flight request when
+`VTOL_RepairPatrol` installs its phase-one point marker. Strict 3.1 and
+Community 3.9 retain their existing behavior: takeoff occurs only in phase
+zero [04 R-ORD-01 §7], and flight bypasses vertical control outside the map
+[04 §10.1]. A grounded retained leg therefore cannot fly; an off-map leg can
+wait indefinitely for an altitude it cannot reach.
+
+Modern requests airborne mode through the ordinary mode setter if the
+aircraft is grounded and unattached. For each waypoint axis whose footprint
+would select the off-map air sector, it projects to the centre of the nearest
+valid footprint-anchor cell, using the collision record's footprint and
+half-cell bias. The far-edge comparison remains strict [04 R-AIR-01 §5].
+An axis with an already valid footprint is unchanged; an axis with no valid
+anchor keeps its original coordinate. The marker then uses the ordinary terrain-relative
+cruise altitude and flight integration. No unit position is teleported, and
+the original waypoint coordinates, queue identity, successors, phase, work
+receipts and arrival rules remain intact. This also repairs a previously
+stalled retained leg at its next ordinary maintenance visit.
+
+The decision applies only to construction-patrol phase-one point markers.
+Takeoff markers, work approaches, orbit markers, repair/guard/combat orders,
+attached aircraft and the flight integrator keep their existing contracts.
+It adds no persistent state, RNG draws or resource transactions; work still
+uses the ordinary construction and repair executors. The existing `RuleSet`
+binds the decision, including restored and newly created movers.
+
+`TestConstructionPatrolRecoveryMarkerPolicy` covers the four map edges,
+footprint-bound equality, fractional valid coordinates and a saved half-cell
+bias, with unchanged queues, positions, resources and RNG. It checks Strict,
+Community and unbound bypasses; the companion exclusion test preserves other
+marker families. `TestConstructionAircraftGroupPatrolAtMapEdgeRetail` issues
+an ordinary group command whose formation offset creates a negative waypoint,
+then checks the bound marker policy and continued patrol. The retained-leg
+test reconstructs both grounded and off-map low-altitude conditions from the
+issue's diagnostic, and the completion test observes actual paid fusion
+assistance finishing while the aircraft's footprint is off-map, followed by
+repeated patrol legs. These are authored reconstructions, not a restart of the
+reporter's battle: the diagnostic omits its command history and flight velocity.
+
 ### 3.4.1 Modern bomber pass completion
 
 **Nanolathe Modern policy.** An accepted bombing pass may finish before its
@@ -1453,24 +1495,44 @@ on-map candidate meets the lateral distance, it keeps the ordinary ranked
 fallback. The initial approach keeps its existing score. A lower-exposure
 current point cannot defeat every real move and make the gunship hover
 indefinitely (issue 121, `TestAirHoverRepositionMakesProgressUnderCover`).
-It slides on to the next point 45 ticks after arriving, at once when it has lost health in
-the last 90 ticks or its point is covered, and after 240 ticks regardless,
-as retail's orbit keeps a gunship moving. Far from the point it flies there
-round anti-air that does not cover the point. Two refused engagement checks
-move it to half range. These checks include a physical shot refusal from the
-current weapon visit through the existing weapon adapter, as well as the
-unit-to-unit range/medium gate. An observed obstruction makes a point whose
+**Nanolathe Modern policy (continuous gunships, user-authorized 2026-10-23):**
+it slides on immediately within 24 world units of the point, before the frozen
+marker brakes to a hold, and replans after 240 ticks regardless. There is no
+arrival dwell, including before the first incoming hit. Far from the point it
+flies there round anti-air that does not cover the point. Two refused
+unit-to-unit range/medium checks near the point move it to half range.
+Physical shot refusals instead act in the current weapon visit through the
+existing weapon adapter, even while travelling. The gunship keeps heading to
+its current point if that point previews clear; otherwise it chooses another.
+An observed obstruction makes a point whose
 translated shot preview is clear outrank blocked or unproven points before
 lateral movement, exposure and spacing are ranked. Previews use the candidate's
 terrain-relative cruise altitude and combat's existing physical preview, with
 the actual observed muzzle and target. They make no COB query, draw no RNG,
 charge no resources and allocate no projectile. Reload, aim and incoming-damage
-coordination waits supply no physical refusal. When no point is proven clear,
-ordinary lateral selection continues; this bounded search does not promise a
-globally clear route or bypass the weapon's final admission.
-The dwell begins on the first arrival at the current point, before testing
-its expiry; travel time and an earlier point's arrival cannot consume it
-(`TestAirHoverDwellStartsAtCurrentArrival`, issue 121).
+coordination waits supply no physical refusal.
+
+After choosing a clear escape point, the same bounded candidate set supplies a
+companion point. It must meet the same lateral distance in both directions,
+preview clear at both ends and at the quarter, half and three-quarter positions
+between them, and minimize the existing exposure/wingman/distance score.
+The pilot alternates these two points on arrival. This preserves a usable
+firing path after shots resume; immediately returning to unproven points can
+lose burst tails or whole bursts behind the same obstruction. Reuse requires
+the same live target, exact target position, anti-air picture version and
+under-fire status, with no new physical or repeated range refusal. The points
+are transient pilot state, not retained combat observation or permission to
+fire. A new order, restore or gap in Modern hover visits discards the plan.
+When no pair is proven clear, ordinary point selection continues. Sampling
+does not prove every point of the aircraft's curved flight clear, predict
+future obstacles, or bypass any pellet's final admission.
+If every candidate is blocked or unproven, retain the fallback goal for up to
+15 ticks before another full physical search. Failed shots do not start reload,
+so otherwise each tick would repeat the search and replace the movement goal.
+Arrival, changed target geometry or threats, or changed under-fire status
+invalidates this failed result sooner; a previously clear point that becomes
+blocked gets an immediate search. This retry interval applies only after a
+failed search, not to the first observed refusal.
 
 **Issue 121 follow-up.** A move between the two rings on the same bearing is
 large enough to pass the former 64-unit travel test, but is entirely radial:
@@ -1572,7 +1634,9 @@ saved: a restored or re-ordered aircraft starts a fresh pilot, the picture is
 rebuilt on first use, and the board refills as pilots run and aircraft are
 hit. `ForgetUnit` drops a pilot.
 Switching to Strict leaves the record in a Modern phase that the retail leg
-then runs; switching back starts fresh pilots. The pilots draw no random
+then runs; switching back resumes Modern planning. A gunship recomputes its
+movement plan after any gap in its per-tick Modern hover visits, including a
+visit through the retail leg. The pilots draw no random
 numbers and charge no resources; executing the ordinary flight and weapons
 keeps their effects. Bomb strings, landing and repair keep their ordinary
 costs and draws.
@@ -1604,13 +1668,30 @@ bypass, the anti-air preference, shared attacks, the attacker preference,
 the slot hand-off, the strafe break, flying out of cover and the missile
 pricing.
 `movement.TestAirHoverRepositionMovesAcrossTargetBearing` rejects radial ring
-swaps; `TestAirHoverUsesPhysicalRefusalForFiringPoint` checks the refusal
-cadence, candidate altitude and RNG-neutral preview. The retail-content
+swaps; `TestAirHoverSlidesAtArrivalWithoutDwell` checks the turn boundary,
+including tick wrap; `TestAirHoverUsesPhysicalRefusalForFiringPoint` checks
+immediate recovery, retention of a clear escape leg, candidate altitude and
+RNG-neutral preview. `TestAirHoverKeepsClearSlideUntilConditionsChange` and
+`TestAirHoverClearEndpointsDoNotProveClearSlide` lock the reusable path's
+evidence and lifetime.
+`TestAirHoverClearSlideMovesLaterallyInBothDirections` checks mixed-ring return
+legs, and `TestAirHoverFailedFiringSearchKeepsMovingUntilRetry` bounds unsuccessful
+searches without replacing their moving fallback. The retail-content
 `airdiag.TestGunshipsSlideAndFireThroughRealFlight` checks each of three
 Brawlers' actual emitted pellets in consecutive 240-tick windows, lateral
 travel and bounded stops during direct attacks and patrols around an
 indestructible crystal, plus direct attacks on a moving ground target, in
-all three modes. Burst anchors do not count as emitted pellets. The same
+all three modes. Each window must retain at least three quarters of the
+authored reload/burst capacity after a boundary allowance, and a dry interval
+may not exceed three reloads plus a burst span. Near-stops at no more than a
+quarter world unit per tick are limited to eight ticks, allowing a brief
+reversal but rejecting the former 31–32-tick pauses. Burst anchors do not
+count as emitted pellets. Only targets are healed; their ordinary Hold Fire
+stance isolates firing while preserving friendly damage and its reload cost.
+`TestGunshipContinuousFlightThroughRuleSwitchAndRetarget` covers the open
+vehicle-plant reproduction, a live switch to Strict and replacement by a new
+Modern target. `TestGunshipKeepsMovingUnderRealMissileFire` separately retains
+actual enemy missiles and aircraft health loss. The same
 patrol reproduction still fires nothing with lateral selection alone:
 obstruction feedback is necessary to leave the blocked pair of sideways
 points. Separate runs with ordinary line of sight retain firing and lateral

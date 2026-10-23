@@ -23,7 +23,7 @@ func TestRetailContinuationPreflightFailureIsAtomic(t *testing.T) {
 		missionDifficultyValue: 2, missionSide: 1, campaignProgress: progress,
 		campaignProgressSet: true,
 	}
-	if err := shell.applyRetailContinuation(&session.RetailCampaignContinuation{CampaignPath: "camps/nope.tdf", MissionIndex: -1}); err == nil {
+	if err := shell.applyRetailContinuation(&session.RetailCampaignContinuation{CampaignPath: "camps/nope.tdf", MissionIndex: -1}, nil); err == nil {
 		t.Fatal("invalid continuation unexpectedly succeeded")
 	}
 	if shell.campaignIdx != 4 || shell.missionIdx != 3 || shell.missionDifficultyValue != 2 || shell.missionSide != 1 {

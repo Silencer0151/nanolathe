@@ -23,6 +23,10 @@ type shippedConfig struct {
 	dir, id, table string
 	// legacy is the old profile's gameplay block beyond its table name.
 	legacy func(*community.Features)
+	// added is what the config gained after the migration, each switch with
+	// its evidence: the config resolves to the removed table plus exactly
+	// these, and nothing else may differ.
+	added func(*community.Features)
 	// unitLimit and searchEntries are the old profile's limits.unit_limit and
 	// limits.search_entries, which it projected onto the table.
 	unitLimit, searchEntries int
@@ -53,6 +57,9 @@ var shippedConfigs = []shippedConfig{
 			f.HealTimeBitmask = true
 			f.RepairRate.RepairMultiplier, f.RepairRate.SelfHealMultiplier = 1, 1
 		},
+		// The patched executable's swapped difficulty name slots
+		// (research/extensions/taesc-engine.md "AI").
+		added:     func(f *community.Features) { f.AIDifficultyReversed = true },
 		unitLimit: 1000, searchEntries: 66650,
 		wantDigest: "d398864376254306cf03d54645a25f08b5803c9bd0727da8b3c999d9690c3ff9",
 		detect:     []string{"aE", "downloadsE", "gamedatE", "guiE", "unitpicE", "unitsE", "weaponE"},
@@ -91,8 +98,9 @@ func readShippedConfig(t *testing.T, dir string) Metadata {
 // TestShippedConfigsReproduceTheRemovedTables is the identity proof the
 // migration owes: for each mod, the config's communityFeatures resolves to
 // exactly the Features value its old named table plus its old profile
-// produced, field for field and digest for digest, and Strict still ignores
-// it.
+// produced, field for field and digest for digest, together with only the
+// switches the config declares it gained since (shippedConfig.added), and
+// Strict still ignores it.
 func TestShippedConfigsReproduceTheRemovedTables(t *testing.T) {
 	for _, tc := range shippedConfigs {
 		t.Run(tc.id, func(t *testing.T) {
@@ -102,11 +110,17 @@ func TestShippedConfigsReproduceTheRemovedTables(t *testing.T) {
 				t.Fatal(err)
 			}
 			want := frozenProfileResolution(t, tc)
-			if !reflect.DeepEqual(got, want) {
-				t.Fatalf("config resolves to\n %+v\nthe removed table and profile resolved to\n %+v", got, want)
+			if want.Digest() != tc.wantDigest {
+				t.Fatalf("the removed table and profile digest = %s, want the pre-migration %s", want.Digest(), tc.wantDigest)
 			}
-			if got.Digest() != tc.wantDigest {
-				t.Fatalf("digest = %s, want the pre-migration %s", got.Digest(), tc.wantDigest)
+			if tc.added != nil {
+				tc.added(&want)
+				if got.Digest() == tc.wantDigest {
+					t.Fatal("the declared addition did not change the resolved config identity")
+				}
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("config resolves to\n %+v\nthe removed table and profile, with the declared additions, resolved to\n %+v", got, want)
 			}
 			if strict, err := community.Resolve(true, meta.CommunitySources()...); err != nil || strict != (community.Features{}) {
 				t.Fatalf("Strict resolved the config's table: %+v, %v", strict, err)

@@ -46,17 +46,17 @@ func (w *economyCheckpointFailAt) Write(p []byte) (int, error) {
 
 func TestCheckpointEconomyDenseErrorPaths(t *testing.T) {
 	// Authored byte offsets: the nil-binding/zero-table service prefix plus
-	// ten 203-byte players ends at 2192, then each physical row is 48 bytes.
+	// ten 203-byte players ends at 2193, then each physical row is 48 bytes.
 	for _, tc := range []struct {
 		offset int
 		path   string
 	}{
-		{2240, "Archived[0].Production"}, {2244, "Archived[0].Requested"},
-		{2248, "Archived[1].Production"}, {2252, "Archived[1].Requested"},
-		{2256, "Buckets[0].Accepted"}, {2260, "Buckets[0].Carry"},
-		{2264, "Buckets[0].Production"}, {2268, "Buckets[0].Requested"},
-		{2272, "Buckets[1].Accepted"}, {2276, "Buckets[1].Carry"},
-		{2280, "Buckets[1].Production"}, {2284, "Buckets[1].Requested"},
+		{2241, "Archived[0].Production"}, {2245, "Archived[0].Requested"},
+		{2249, "Archived[1].Production"}, {2253, "Archived[1].Requested"},
+		{2257, "Buckets[0].Accepted"}, {2261, "Buckets[0].Carry"},
+		{2265, "Buckets[0].Production"}, {2269, "Buckets[0].Requested"},
+		{2273, "Buckets[1].Accepted"}, {2277, "Buckets[1].Carry"},
+		{2281, "Buckets[1].Production"}, {2285, "Buckets[1].Requested"},
 	} {
 		t.Run(tc.path, func(t *testing.T) {
 			s := &Service{unitBuckets: make([]UnitEconomy, 2)}

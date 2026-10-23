@@ -46,11 +46,11 @@ func requireMovementTerrainRefusal(t *testing.T, s *System, c *CheckpointContext
 }
 
 // Independent empty-System framing pins the Terrain byte between Steers and
-// activeOrders. Community is 31 bools + 14 i64s; Profile is 16 bytes. Neither
+// activeOrders. Community is 32 bools + 14 i64s; Profile is 16 bytes. Neither
 // installation metadata nor a world payload is added (DESIGN_MULTIPLAYER §16.3.57).
 func movementTerrainVector(t *testing.T, terrain uint8) []byte {
 	return movementCheckpointVector(t,
-		[2]uint8{}, uint32(0), [143]byte{}, uint8(0), [16]byte{},
+		[2]uint8{}, uint32(0), [144]byte{}, uint8(0), [16]byte{},
 		uint32(0), uint8(0), uint8(1), int64(0), int32(0), uint16(6), uint32(0),
 		uint8(0), uint32(0), uint8(0), uint8(0), uint32(0), terrain,
 		uint32(0), [10]uint32{}, uint8(0), // activeOrders, airBases, airLegHandler

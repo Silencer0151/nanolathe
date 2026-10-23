@@ -2331,6 +2331,10 @@ without it ([utility README §13.15](../internal/aikit/brains/utility/README.md)
 income across every rule-set switch; a Classic player takes each set's think
 step and income word. No switch starts or stops a Modern controller: only
 the lobby mark chooses it, and nothing changes the mark in battle.
+The AI's difficulty interpretation is also an entry parameter, alongside its
+merged parameters: Escalation's reversed index is read through the retained
+entry Community table, including on restore. Current-rule income projection
+remains separate (DESIGN_COMMUNITY_PATCH §4.8).
 
 **Saves.** The retail bank carries nothing of the controller. What a load
 needs to rebuild each controller with the same personality is a small record

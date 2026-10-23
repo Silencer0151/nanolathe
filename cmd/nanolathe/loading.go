@@ -340,12 +340,17 @@ func (g *gameShell) loadRetailSavePath(path string) error {
 		if err := continuationRestrictionsRefusal(selection); err != nil {
 			return err
 		}
-		if err := g.applyRetailContinuation(loaded.Continuation); err != nil {
+		var sources *session.CommunitySources
+		if hasSidecar {
+			sources = &selection.sources
+		}
+		if err := g.applyRetailContinuation(loaded.Continuation, sources); err != nil {
 			return err
 		}
 		// A continuation starts the next mission fresh, so what it takes
 		// from its sidecar is the selection that mission is entered under:
-		// the mutators, the rule set and the unit limit.
+		// the mutators, the rule set and the unit limit. The briefing's
+		// Start action retains the recorded Community sources (§7.3).
 		if hasSidecar {
 			g.setup.UnitLimit = sidecar.UnitLimit
 			g.selectFromSidecar(selection, modPlan.selection, nil)

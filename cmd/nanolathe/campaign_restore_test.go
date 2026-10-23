@@ -97,7 +97,7 @@ func TestCampaignRetailRestoreAndContinuationKeepSideAndSelection(t *testing.T) 
 			g.campaignOptions = nil
 			g.missionSide = 1 - side
 			c := &session.RetailCampaignContinuation{CampaignPath: path, MissionIndex: 1, Difficulty: 2, Side: side, Thumbs: [25]byte{'W'}}
-			if err := g.applyRetailContinuation(c); err != nil {
+			if err := g.applyRetailContinuation(c, nil); err != nil {
 				t.Fatal(err)
 			}
 			if g.briefing == nil || g.briefing.mission.CampaignIndex != 1 || g.missionSide != side || g.missionDifficulty() != 2 || g.campaignProgress.Thumbs[0] != 'W' {

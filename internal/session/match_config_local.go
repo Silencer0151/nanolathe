@@ -9,6 +9,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/nanolathe-gg/nanolathe/internal/ai"
+	"github.com/nanolathe-gg/nanolathe/internal/community"
 	"github.com/nanolathe-gg/nanolathe/internal/content"
 	"github.com/nanolathe-gg/nanolathe/internal/gameplay"
 	"github.com/nanolathe-gg/nanolathe/internal/orders"
@@ -164,7 +165,7 @@ func newMatchConfigRequest(cfg SkirmishConfig, options SkirmishEntryOptions, roo
 		r.SurvivalNoAir = cfg.Survival.NoAir
 		r.SurvivalNoNaval = cfg.Survival.NoNaval
 	}
-	if r.Seats, err = matchSeatsFromSetup(cfg, options, room, lobby); err != nil {
+	if r.Seats, err = matchSeatsFromSetup(cfg, options, room, lobby, features); err != nil {
 		return MatchConfigRequest{}, err
 	}
 	// A chosen start is carried only where the rule set honours it, so a
@@ -187,7 +188,7 @@ func newMatchConfigRequest(cfg SkirmishConfig, options SkirmishEntryOptions, roo
 // more humans and the room host's computers: the host is the first human,
 // relay seat 0, and each computer's difficulty is its own row's in lobby
 // (§6.6, §16.6).
-func matchSeatsFromSetup(cfg SkirmishConfig, options SkirmishEntryOptions, room MatchRoomInputs, lobby *[SkirmishMaxPlayers]uint8) ([]MatchSeat, error) {
+func matchSeatsFromSetup(cfg SkirmishConfig, options SkirmishEntryOptions, room MatchRoomInputs, lobby *[SkirmishMaxPlayers]uint8, features community.Features) ([]MatchSeat, error) {
 	n := cfg.NumPlayers
 	attacker := cfg.survivalAttacker()
 	local := -1
@@ -264,7 +265,7 @@ func matchSeatsFromSetup(cfg SkirmishConfig, options SkirmishEntryOptions, room 
 					return nil, matchFieldError(path+".difficulty", "0 easy, 1 medium or 2 hard")
 				}
 			}
-			text, err := options.AIOverrides.For(uint8(i), matchAIDifficulty(s.Difficulty))
+			text, err := options.AIOverrides.For(uint8(i), matchAIDifficulty(uint8(DifficultyTier(features, int(s.Difficulty)))))
 			if err != nil {
 				return nil, matchFieldError(path+".aiParams", "canonical key=value parameters: "+err.Error())
 			}
@@ -282,8 +283,8 @@ func matchSeatsFromSetup(cfg SkirmishConfig, options SkirmishEntryOptions, room 
 	return seats, nil
 }
 
-// matchAIDifficulty is the AI vocabulary's word for a difficulty value, the
-// layer AIOverrides.For merges.
+// matchAIDifficulty is the AI vocabulary's word for a difficulty tier
+// (DifficultyTier), the layer AIOverrides.For merges.
 func matchAIDifficulty(d uint8) ai.Difficulty {
 	switch d {
 	case 0:

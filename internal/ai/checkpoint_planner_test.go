@@ -51,11 +51,11 @@ func TestCheckpointPlannerOwnerTags(t *testing.T) {
 	c := aiCheckpointContext(t)
 	m := &Manager{}
 	baseline := aiCheckpointBytes(t, m, c)
-	// BattleSeed, two bindings, Community (143) precede ConstructionRules.
+	// BattleSeed, two bindings, Community (144) precede ConstructionRules.
 	// The later Planner byte follows Controller, empty parameters, ten
 	// deadlines, Ext, Factory ref, nine empty groups, IsAlliance,
 	// JammerSuppresses, MissionGateFlag, OrderBinding, OriginX/Z and Passive.
-	const rulesOffset, plannerOffset = 149, 262
+	const rulesOffset, plannerOffset = 150, 263
 	if baseline[rulesOffset] != 0 || baseline[plannerOffset] != 0 {
 		t.Fatal("nil rules/planner lost their zero tags")
 	}

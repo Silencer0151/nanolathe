@@ -94,7 +94,7 @@ func TestCheckpointProjectileVector(t *testing.T) {
 
 // This whole-owner vector fixes framing and service field ordering without
 // using any production leaf to construct the expectation. Community's resolved
-// zero table is 31 bools and 14 i64s, and an empty projectile is 180 bytes.
+// zero table is 32 bools and 14 i64s, and an empty projectile is 180 bytes.
 func TestCheckpointCombatOwnerVector(t *testing.T) {
 	s := NewServiceWithProjectileCapacity(1)
 	s.OpaqueLiquidMode = true
@@ -121,7 +121,7 @@ func TestCheckpointCombatOwnerVector(t *testing.T) {
 	s.targets.primary[0] = []pool.Handle{0xffff, 2}
 	s.targets.secondary[9] = []pool.Handle{3}
 	want := checkpointHex(t,
-		strings.Repeat("00", 143)+ // resolved Community
+		strings.Repeat("00", 144)+ // resolved Community
 			strings.Repeat("00", 9)+"01"+"0000"+ // ports, liquid, wind/reaction
 			"01000000"+strings.Repeat("00", 180)+"00"+ // Records and Rules
 			"010000000000000000000000000000000100000000"+ // Slots capacity/count/dead

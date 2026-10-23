@@ -119,9 +119,9 @@ func TestCheckpointConstructionVector(t *testing.T) {
 		}
 		return b
 	}
-	// Four absent ports, shared Community zero value (143 bytes), three
+	// Four absent ports, shared Community zero value (144 bytes), three
 	// absent ports, ModeSelector, six absent ports, terrain present, world absent.
-	want := make([]byte, 4+143+3)
+	want := make([]byte, 4+144+3)
 	want = append(want, decode("08070605040302010000000000000100")...)
 	want = append(want, decode("03000000"+"00000000ffff0000"+"0200000002010000"+"0001000003000000")...) // sorted links
 	want = append(want, decode("03000000"+"00ffffffffffffffff00000000000100000300000000000000")...)

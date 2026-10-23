@@ -2487,27 +2487,26 @@ func sessionAIDifficulty(s *Session) (ai.Difficulty, bool) {
 	if sessionHasSeatDifficulty(s) {
 		return "", false
 	}
-	word, ok := sessionDifficultyWord(s)
-	if !ok {
-		return "", false
-	}
-	return aiDifficultyForWord(word), true
+	return sessionAIDifficultyFor(s, 0)
 }
 
 // sessionAIDifficultyFor is the plan-gate word for player's manager in a
 // battle whose computers each carry their own word: a computer seat's own
-// word (sessionSeatDifficultyWord), and the battle's for every other row,
+// index (sessionSeatDifficultyIndex), and the battle's for every other row,
 // whose manager is never dispatched or plans nothing. The Modern persona reads
 // the same word through the manager's profile (ControllerDifficulty).
+// Plan/persona and merged AI parameters are fixed at battle entry; a rule
+// switch keeps the controller (DESIGN_SESSIONS_AI_SAVE "Modern AI computer
+// player", "Switching"). Restore must use that same recorded entry table.
 func sessionAIDifficultyFor(s *Session, player uint8) (ai.Difficulty, bool) {
-	if word, ok := sessionSeatDifficultyWord(s, player); ok {
-		return aiDifficultyForWord(word), true
+	index, ok := sessionSeatDifficultyIndex(s, player)
+	if !ok {
+		index, ok = sessionDifficultyIndex(s)
 	}
-	word, ok := sessionDifficultyWord(s)
 	if !ok {
 		return "", false
 	}
-	return aiDifficultyForWord(word), true
+	return aiDifficultyForWord(DifficultyTier(s.EntryCommunity, index)), true
 }
 
 // sessionHasSeatDifficulty reports a skirmish battle whose computers each
@@ -2523,6 +2522,14 @@ func sessionHasSeatDifficulty(s *Session) bool {
 // word outside the vocabulary is reported absent, so such rows read the
 // battle's word as every row of every other battle does.
 func sessionSeatDifficultyWord(s *Session, player uint8) (int, bool) {
+	index, ok := sessionSeatDifficultyIndex(s, player)
+	if !ok {
+		return 0, false
+	}
+	return DifficultyTier(s.Community, index), true
+}
+
+func sessionSeatDifficultyIndex(s *Session, player uint8) (int, bool) {
 	if !sessionHasSeatDifficulty(s) {
 		return 0, false
 	}
@@ -2550,19 +2557,43 @@ func aiDifficultyForWord(word int) ai.Difficulty {
 	}
 }
 
-// sessionDifficultyWord is the battle's difficulty word itself — 0 easy, 1
-// medium, 2 hard. It has two consumers, and they must read the same word: the
-// AI profile's plan gate [08 R-AI-01 §12] and the ledger's production discount
-// for a computer player, whose "global mode selector" is established as this
-// same difficulty word [05 R-ECO-01 §3]. One reader, so there is one copy.
+// DifficultyTier is the difficulty a stored difficulty index plays: 0 easy,
+// 1 medium, 2 hard, or the reverse under a table whose AIDifficultyReversed
+// is set, as TA: Escalation's patched executable reads the index: its name
+// slots are swapped, so index 0 selects the Hard plan and the Hard income
+// factor (research/extensions/taesc-engine.md "AI"; that content's menus
+// spell their stages Hard|Medium|Easy). A setup, a save and a lobby keep the
+// index as stored; every reader that means a tier converts it here. The
+// mapping is its own inverse, so it also turns a tier into the index that
+// plays it. An index outside 0..2 is returned unchanged for the caller to
+// refuse.
+func DifficultyTier(f community.Features, index int) int {
+	if f.AIDifficultyReversed && index >= 0 && index <= 2 {
+		return 2 - index
+	}
+	return index
+}
+
+// sessionDifficultyWord is the current rule set's reading of the stored
+// battle index for the ledger's production discount [05 R-ECO-01 §3]. At
+// entry this is also the AI's tier [08 R-AI-01 §12]; the plan/persona then
+// remains an entry parameter while income follows subsequent rule switches.
 // A bound rule set may project a different word onto the ledger
 // (projectComputerIncome); it derives that word from this reader when it is
 // bound and keeps no copy of the difficulty of its own.
 // A word outside the vocabulary is reported absent rather than guessed.
-// In a battle whose computers each carry their own word, both consumers take
+// In a battle whose computers each carry their own word, the ledger takes
 // a computer seat's from sessionSeatDifficultyWord instead, and this word is
 // left to the rows that are no computer seat.
 func sessionDifficultyWord(s *Session) (int, bool) {
+	index, ok := sessionDifficultyIndex(s)
+	if !ok {
+		return 0, false
+	}
+	return DifficultyTier(s.Community, index), true
+}
+
+func sessionDifficultyIndex(s *Session) (int, bool) {
 	if s == nil {
 		return 0, false
 	}

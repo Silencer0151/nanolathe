@@ -76,10 +76,10 @@ func TestMovementCheckpointCompositionPresenceVector(t *testing.T) {
 		if err := c.SetCompositionBindings(s, c.Orders.Units.Keys, a); err != nil {
 			t.Fatal(err)
 		}
-		// Empty maps remain present. Community is 31 bools + 14 i64s;
+		// Empty maps remain present. Community is 32 bools + 14 i64s;
 		// Profile is 16 bytes. Proofs add no bytes or graph references.
 		want := movementCheckpointVector(t,
-			uint8(0), mask&1, uint32(0), [143]byte{}, (mask>>1)&1, [16]byte{},
+			uint8(0), mask&1, uint32(0), [144]byte{}, (mask>>1)&1, [16]byte{},
 			uint32(0), uint8(0), uint8(1), int64(0), int32(0), uint16(6), uint32(0),
 			(mask>>2)&1, uint32(0), uint8(0), uint8(0), uint32(0), uint8(0),
 			uint32(0), [10]uint32{}, uint8(0),

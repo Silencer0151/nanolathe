@@ -247,12 +247,12 @@ func TestCheckpointCombatBindingSlots(t *testing.T) {
 }
 
 // This full vector is independently authored from §16.3.16/.70. One zero
-// projectile occupies 180 bytes; Community is 31 bools plus 14 i64s. The
+// projectile occupies 180 bytes; Community is 32 bools plus 14 i64s. The
 // optional reaction adds exactly eight lexical callback bytes, never a table.
 func TestCheckpointCombatBindingPresenceVector(t *testing.T) {
 	f := newCheckpointBoundCombat(t, combatCheckpointContext(t))
 	want := checkpointHex(t,
-		strings.Repeat("00", 143)+
+		strings.Repeat("00", 144)+
 			"010101010101010101000101"+"0101010101010101"+
 			"01000000"+strings.Repeat("00", 180)+"00"+
 			"010000000000000000000000000000000100000000"+
@@ -266,7 +266,7 @@ func TestCheckpointCombatBindingPresenceVector(t *testing.T) {
 	}
 	// Independent byte positions also distinguish UnderAttackNotice from
 	// UnderAttackSilenced and each service slot from its adjacent owner tag.
-	offsets := []int{143, 144, 145, 146, 148, 149, 150, 151, 378, 379, 155, 156, 157, 158, 159, 160, 161, 162}
+	offsets := []int{144, 145, 146, 147, 149, 150, 151, 152, 379, 380, 156, 157, 158, 159, 160, 161, 162, 163}
 	for i, slot := range checkpointBindingSlots {
 		slot.clear(f.s)
 		got := combatCheckpointBytes(t, f.s, f.c)
@@ -284,7 +284,7 @@ func TestCheckpointCombatBindingPresenceVector(t *testing.T) {
 	}
 	empty := combatCheckpointBytes(t, f.s, f.c)
 	wantEmpty := bytes.Clone(want)
-	clear(wantEmpty[155:163])
+	clear(wantEmpty[156:164])
 	if !bytes.Equal(empty, wantEmpty) {
 		t.Fatal("empty reaction framing")
 	}
@@ -294,8 +294,8 @@ func TestCheckpointCombatBindingPresenceVector(t *testing.T) {
 		t.Fatal(err)
 	}
 	absent := combatCheckpointBytes(t, f.s, fresh)
-	wantAbsent := append(bytes.Clone(wantEmpty[:155]), wantEmpty[163:]...)
-	wantAbsent[154] = 0
+	wantAbsent := append(bytes.Clone(wantEmpty[:156]), wantEmpty[164:]...)
+	wantAbsent[155] = 0
 	if !bytes.Equal(absent, wantAbsent) {
 		t.Fatal("absent reaction framing")
 	}

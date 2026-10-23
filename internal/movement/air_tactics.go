@@ -76,9 +76,6 @@ const (
 	// airWingSpread is the planning cost, in ticks, of a run heading within
 	// about 17 degrees of a wingman's on the same target.
 	airWingSpread = 90
-	// airHoverDwell is how long a gunship that is not being shot at holds a
-	// standoff point before sliding on to the next one.
-	airHoverDwell = 45
 	// airQuarterTurn and airHalfTurn are angle words (65536 to the circle);
 	// airTangentMargin is the clearance added to a tangent past anti-air.
 	airQuarterTurn   = 0x4000
@@ -135,7 +132,18 @@ type airPilot struct {
 
 	standX, standZ int64
 	standTick      uint32
-	standArrive    uint32
+	standVisit     uint32
+	standAim       Vec3
+	standPicture   uint32
+	standUnder     bool
+	// A failed search retains its fallback briefly; a refused shot can recur
+	// every tick without reloading, so searching again each time churns goals.
+	noClearTarget *units.Unit
+	// A refused shot can establish two firing points and the space between
+	// them. Keep that slide after escaping cover instead of choosing an
+	// unproven point again as soon as firing resumes.
+	slideX, slideZ int64
+	slideTarget    *units.Unit
 	standSet       bool
 	standHeld      bool
 	refused        uint8
@@ -1412,8 +1420,7 @@ func airStrafeBreak(tx, tz, px, pz, rng, turn int64, threats []airThreat) int64 
 // keeps retail's frozen marker about its target, so it faces the target while
 // it slides [04 R-AIR-01 §8], but chooses its standoff point: inside weapon
 // range, by the least visible anti-air exposure and then the shortest move.
-// Under fire, or whenever its point is exposed, it keeps moving between
-// standoff points rather than hovering in place.
+// It changes points on arrival, without waiting for incoming damage.
 func (s *System) legAirToGroundHoverModern(u *units.Unit, n *orders.Node, tick uint32) orders.Code {
 	if s.installOffMapRecoveryMarker(u, n) {
 		return 2
@@ -1431,6 +1438,12 @@ func (s *System) legAirToGroundHoverModern(u *units.Unit, n *orders.Node, tick u
 		return 7
 	}
 	p := s.airPilotFor(u, n, tick)
+	// The Modern hover leg runs every tick. A gap can include a live switch
+	// through the retail leg, which replaces its marker without this pilot.
+	if p.standSet && tick-p.standVisit > 1 {
+		p.standSet, p.standHeld, p.slideTarget = false, false, nil
+	}
+	p.standVisit = tick
 	if p.fresh || n.Phase == 1 {
 		// Retail's phase 1 hands every slot to its own scan and phase 2 then
 		// binds slot 0 to the attack [04 R-AIR-01 §8]: a second weapon keeps
@@ -1455,6 +1468,7 @@ func (s *System) legAirToGroundHoverModern(u *units.Unit, n *orders.Node, tick u
 		return 5 // *complete*: the issuing order chooses again
 	}
 	under := p.underFire(tick)
+	samePlan := p.standAim == (Vec3{X: tx, Y: ty, Z: tz}) && p.standPicture == pic.version && p.standUnder == under
 	weapons := orderWeapons(u)
 	blocked := tgt != nil && weapons != nil && weapons.FiringPositionBlockedHook() != nil && weapons.FiringPositionBlockedHook()(u, tgt, tick)
 
@@ -1462,7 +1476,7 @@ func (s *System) legAirToGroundHoverModern(u *units.Unit, n *orders.Node, tick u
 	// the target is simply out of range.
 	atStand := p.standSet && isqrt64((p.standX-px)*(p.standX-px)+(p.standZ-pz)*(p.standZ-pz)) <= 48
 	if atStand && tick-p.standTick >= 30 && tick%15 == 0 {
-		if n.Target != 0 && (!weaponCanEngage(u, n.Target, 0) || blocked) {
+		if n.Target != 0 && !weaponCanEngage(u, n.Target, 0) {
 			p.refused++
 		} else {
 			p.refused = 0
@@ -1473,25 +1487,34 @@ func (s *System) legAirToGroundHoverModern(u *units.Unit, n *orders.Node, tick u
 		dt := isqrt64((p.standX-twx)*(p.standX-twx) + (p.standZ-twz)*(p.standZ-twz))
 		ds := isqrt64((p.standX-px)*(p.standX-px) + (p.standZ-pz)*(p.standZ-pz))
 		arrived := ds <= 24
-		exposed := airPointExposure(p.standX, p.standZ, pic.list) > 0
-		if arrived && p.standArrive == p.standTick-1 {
-			p.standArrive = tick
+		// A moving gunship may never reach the old refusal sampling window.
+		// React in this weapon visit, but finish an already-clear escape leg.
+		// Only an all-blocked search waits for the existing 15-tick refusal
+		// cadence. New target geometry or threats invalidate that result.
+		retry := p.noClearTarget != tgt || !samePlan || tick-p.standTick >= 15
+		if blocked && retry && !s.airHoverPointClear(u, tgt, p.standX, p.standZ, tick) {
+			replan = true
 		}
 		switch {
 		case dt > rng*9/10:
 			replan = true // the target moved away from the point
 		case p.refused > 1:
 			replan = true
-		case arrived && (under || exposed):
-			replan = true // keep moving while shot at
-		case arrived && tick-p.standArrive >= airHoverDwell:
-			replan = true // slide on to the next firing point, as retail's orbit does
+		case arrived:
+			replan = true // turn before the frozen marker brakes to a hold
 		case tick-p.standTick >= 240:
 			replan = true
 		}
 	}
 	if replan {
-		s.airChooseStandoff(u, p, twx, twz, rng, pic.list, under, tick)
+		if p.slideTarget != nil && p.slideTarget == tgt && samePlan && !blocked && p.refused <= 1 {
+			p.standX, p.slideX = p.slideX, p.standX
+			p.standZ, p.slideZ = p.slideZ, p.standZ
+			p.standTick, p.refused = tick, 0
+		} else {
+			s.airChooseStandoff(u, p, twx, twz, rng, pic.list, under, tick)
+			p.standAim, p.standPicture, p.standUnder = Vec3{X: tx, Y: ty, Z: tz}, pic.version, under
+		}
 		p.standHeld = false
 		if airBelowThreeQuarters(u) && (under || airPointExposure(p.standX, p.standZ, pic.list) > 0) {
 			if s.airFindBaseAndLand(u, n, s.simRNG(u), tick) || s.airSeekFieldRepair(u, n, tick) {
@@ -1516,6 +1539,20 @@ func (s *System) legAirToGroundHoverModern(u *units.Unit, n *orders.Node, tick u
 		p.standHeld = true
 	}
 	return airHold(n, tick, airLegGateStrike)
+}
+
+// airHoverPointClear previews the observed physical refusal at a firing point.
+func (s *System) airHoverPointClear(u, target *units.Unit, x, z int64, tick uint32) bool {
+	weapons := orderWeapons(u)
+	if weapons == nil || weapons.FiringPositionClearHook() == nil || target == nil {
+		return false
+	}
+	fx, fz := numeric.FixedFromInt(x), numeric.FixedFromInt(z)
+	y := u.Y
+	if u.Def != nil {
+		y = CruiseAltitudeForOffset(s.Terrain, fx, fz, int32(int16(u.Def.CruiseAlt)))
+	}
+	return weapons.FiringPositionClearHook()(u, target, tick, fx, y, fz)
 }
 
 // airChooseStandoff ranks standoff points on two rings about the target and
@@ -1571,6 +1608,24 @@ func (s *System) airChooseStandoff(u *units.Unit, p *airPilot, tx, tz, rng int64
 		target = s.unitFor(p.node.Target)
 	}
 	preview := target != nil && weapons != nil && weapons.FiringPositionBlockedHook() != nil && weapons.FiringPositionClearHook() != nil && weapons.FiringPositionBlockedHook()(u, target, tick)
+	// Keep the first pass's evidence for the bounded companion-point search.
+	var candidates [32]struct {
+		x, z  int64
+		clear bool
+	}
+	pointCost := func(x, z, move int64) int64 {
+		cost := airPointExposure(x, z, threats)*64 + move
+		if move < minMove {
+			cost += 4000
+		}
+		for k := 0; k < nw; k++ {
+			wx, wz := wing[k][0], wing[k][1]
+			if (wx-x)*(wx-x)+(wz-z)*(wz-z) < 120*120 || airAngleAbs(airBearingWU(tx, tz, wx, wz), airBearingWU(tx, tz, x, z)) < 0x0800 {
+				cost += 3000
+			}
+		}
+		return cost
+	}
 	var bestCost int64
 	var bx, bz int64
 	for ring := 0; ring < 2; ring++ {
@@ -1592,23 +1647,11 @@ func (s *System) airChooseStandoff(u *units.Unit, p *airPilot, tx, tz, rng int64
 			moves := !p.standSet || lateral >= minMove*radialDistance && move >= minMove
 			clear := false
 			if preview {
-				x, z := numeric.FixedFromInt(sx), numeric.FixedFromInt(sz)
-				y := u.Y
-				if u.Def != nil {
-					y = CruiseAltitudeForOffset(s.Terrain, x, z, int32(int16(u.Def.CruiseAlt)))
-				}
-				clear = weapons.FiringPositionClearHook()(u, target, tick, x, y, z)
+				clear = s.airHoverPointClear(u, target, sx, sz, tick)
 			}
-			cost := airPointExposure(sx, sz, threats)*64 + move
-			if move < minMove {
-				cost += 4000
-			}
-			for k := 0; k < nw; k++ {
-				wx, wz := wing[k][0], wing[k][1]
-				if (wx-sx)*(wx-sx)+(wz-sz)*(wz-sz) < 120*120 || airAngleAbs(airBearingWU(tx, tz, wx, wz), airBearingWU(tx, tz, sx, sz)) < 0x0800 {
-					cost += 3000
-				}
-			}
+			c := &candidates[ring*16+j]
+			c.x, c.z, c.clear = sx, sz, clear
+			cost := pointCost(sx, sz, move)
 			if best < 0 || clear && !bestClear || clear == bestClear && (moves && !bestMoves || moves == bestMoves && cost < bestCost) {
 				best, bestCost, bx, bz = ring*16+j, cost, sx, sz
 				bestMoves = moves
@@ -1619,11 +1662,47 @@ func (s *System) airChooseStandoff(u *units.Unit, p *airPilot, tx, tz, rng int64
 	if best < 0 {
 		bx, bz = px, pz
 	}
+	p.slideTarget = nil
+	p.noClearTarget = nil
+	if preview && !bestClear {
+		p.noClearTarget = target
+	}
+	if preview && bestClear {
+		// Endpoints alone can straddle a ridge or feature. Admit a reusable
+		// slide only when quarter, half and three-quarter points also preview
+		// clear. Actual curved flight and every pellet still use normal weapon
+		// admission; later physical refusals reconsider this plan.
+		radial := isqrt64((bx-tx)*(bx-tx) + (bz-tz)*(bz-tz))
+		var score int64
+		for _, c := range candidates {
+			if !c.clear {
+				continue
+			}
+			dx, dz := c.x-bx, c.z-bz
+			move := isqrt64(dx*dx + dz*dz)
+			otherRadius := isqrt64((c.x-tx)*(c.x-tx) + (c.z-tz)*(c.z-tz))
+			// The retained pair is flown both ways. Mixed rings must meet
+			// the lateral floor about either endpoint's target bearing.
+			if move < minMove || abs64(dx*(bz-tz)-dz*(bx-tx)) < minMove*max(radial, otherRadius) {
+				continue
+			}
+			cost := pointCost(c.x, c.z, move)
+			if p.slideTarget != nil && cost >= score {
+				continue
+			}
+			clear := true
+			for k := int64(1); k < 4; k++ {
+				if !s.airHoverPointClear(u, target, bx+dx*k/4, bz+dz*k/4, tick) {
+					clear = false
+					break
+				}
+			}
+			if clear {
+				p.slideTarget, p.slideX, p.slideZ, score = target, c.x, c.z, cost
+			}
+		}
+	}
 	p.standX, p.standZ, p.standTick, p.standSet, p.refused = bx, bz, tick, true, 0
-	// Mark this point as not yet reached, even when the previous point was
-	// reached and replaced on this same tick. The relative sentinel also
-	// survives the tick counter wrapping through zero.
-	p.standArrive = tick - 1
 }
 
 // --- repair beside a constructor ---

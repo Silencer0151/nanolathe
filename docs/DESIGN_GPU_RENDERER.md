@@ -7995,6 +7995,29 @@ install, `NANOLATHE_AIRCRAFT_MAP` naming a coastal map and
 the shared benchmark lock. These are staged visual fixtures, not simulated
 flight.
 
+### 34.1 Map-edge receiver
+
+Enhanced aircraft shadows extend the nearest valid bilinear terrain sample
+past the map edge (issue #165). Retail directly uses the query's off-map
+sentinel, so the shadow jumps downward while the aircraft body keeps its
+altitude [03 R-REN-03D §3]. Original preserves that behavior.
+
+For an airborne mover in the modern recording, a sentinel result is replaced
+by a sample with X and Z independently clamped to the bilinear domain: zero
+through one fixed-point step before the last plot column or row begins.
+This also covers the final row/column, where the query has no next neighbour.
+The result feeds both shadow placement and soft-shadow clearance. It applies
+with soft shadows on or off; ordinary in-bounds sampling and its integer
+rounding stay unchanged. The receiver follows terrain along the edge without
+remembering a previous frame. Empty terrain keeps the existing fallback.
+
+This is presentation policy in every gameplay mode. It changes no unit
+position, flight, terrain query, RNG, resources, or simulation fingerprint.
+Grounded units and features keep their existing samples. Classic comparison
+captures preserve Original even when Enhanced art is enabled for the modern
+half. The boundary fixture covers all four edges, corners, a sloped border,
+returning on-map, and both immediate and deferred unit recording.
+
 ## 35. Known limitations and owed work
 
 **Owed human review.** Several layers were built by agents that could not inject

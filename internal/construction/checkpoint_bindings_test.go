@@ -109,7 +109,7 @@ func TestCheckpointConstructionBindingPresenceVectorAndPurity(t *testing.T) {
 	// Community, three bindings, signed mode, five bindings, rules/terrain/world,
 	// four empty collection counts and repair-world presence (§16.3.15/.67).
 	var want bytes.Buffer
-	for _, value := range []any{[4]byte{0, 1, 1, 1}, [143]byte{}, [3]byte{1, 1, 0}, int64(-0x0102030405060708), [5]byte{1, 1, 1, 1, 1}, [3]byte{0, 1, 1}, [4]uint32{}, byte(1)} {
+	for _, value := range []any{[4]byte{0, 1, 1, 1}, [144]byte{}, [3]byte{1, 1, 0}, int64(-0x0102030405060708), [5]byte{1, 1, 1, 1, 1}, [3]byte{0, 1, 1}, [4]uint32{}, byte(1)} {
 		if err := binary.Write(&want, binary.LittleEndian, value); err != nil {
 			t.Fatal(err)
 		}
@@ -141,27 +141,27 @@ func TestCheckpointConstructionBindingIndividualPresencePositions(t *testing.T) 
 		{"CRT", 1, func(f constructionBindingFixture) {
 			f.s.SetCRTRandomWithCheckpointBinding(constructionBindingPanicCRT, f.a)
 		}},
-		{"special", 148, func(f constructionBindingFixture) {
+		{"special", 149, func(f constructionBindingFixture) {
 			f.s.SetIsSpecialSecondStateWithCheckpointBinding(constructionBindingPanicSpecial, f.a)
 		}},
-		{"factory model", 158, func(f constructionBindingFixture) {
+		{"factory model", 159, func(f constructionBindingFixture) {
 			f.s.SetModelForFactoryWithCheckpointBinding(constructionBindingPanicModel, f.a)
 		}},
-		{"unit model", 159, func(f constructionBindingFixture) {
+		{"unit model", 160, func(f constructionBindingFixture) {
 			f.s.SetModelForUnitWithCheckpointBinding(constructionBindingPanicModel, f.a)
 		}},
 		{"combat", 3, func(f constructionBindingFixture) { f.s.Combat = &combat.Service{} }},
-		{"economy", 147, func(f constructionBindingFixture) { f.s.Economy = &economy.Service{} }},
-		{"movement", 160, func(f constructionBindingFixture) { f.s.Movement = &movement.System{} }},
-		{"order binding", 161, func(f constructionBindingFixture) { f.s.OrderBinding = &orders.QueueBinding{} }},
-		{"presentation", 162, func(f constructionBindingFixture) {
+		{"economy", 148, func(f constructionBindingFixture) { f.s.Economy = &economy.Service{} }},
+		{"movement", 161, func(f constructionBindingFixture) { f.s.Movement = &movement.System{} }},
+		{"order binding", 162, func(f constructionBindingFixture) { f.s.OrderBinding = &orders.QueueBinding{} }},
+		{"presentation", 163, func(f constructionBindingFixture) {
 			sink := &constructionOtherSink{}
 			f.s.Presentation = sink
 			if err := SetCheckpointPresentationSink(f.c, sink); err != nil {
 				t.Fatal(err)
 			}
 		}},
-		{"world", 165, func(f constructionBindingFixture) { f.s.World = &units.World{} }},
+		{"world", 166, func(f constructionBindingFixture) { f.s.World = &units.World{} }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newConstructionBindingFixture(t)
@@ -169,7 +169,7 @@ func TestCheckpointConstructionBindingIndividualPresencePositions(t *testing.T) 
 			if err := f.register(); err != nil {
 				t.Fatal(err)
 			}
-			want := make([]byte, 183)
+			want := make([]byte, 184)
 			want[2], want[tc.offset] = 1, 1 // the frozen catalog is always present
 			if got := constructionCheckpointBytes(t, f.s, f.c); !bytes.Equal(got, want) {
 				t.Fatalf("presence at %d\ngot %x\nwant %x", tc.offset, got, want)

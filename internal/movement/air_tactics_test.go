@@ -12,32 +12,27 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/world"
 )
 
-// The 45-tick dwell starts at this point's first arrival, not at battle start
-// or the previous point's arrival (Modern aircraft tactics, issue 121).
-func TestAirHoverDwellStartsAtCurrentArrival(t *testing.T) {
-	for _, priorArrival := range []uint32{0, 50, 100} {
+// Change markers at the arrival boundary, before the ordinary integrator
+// brakes to a hold (Modern aircraft tactics, issue 121).
+func TestAirHoverSlidesAtArrivalWithoutDwell(t *testing.T) {
+	for _, tick := range []uint32{101, 0} {
 		sys, w, u := wideAirFixture(t)
 		target := airTargetFor(t, sys, w, 28, 16)
 		u.InstallWeapon(0, &content.WeaponDef{ID: 1, Range: 300})
 		n := &orders.Node{ID: orders.Lookup("AirToGroundHover"), Owner: u.Handle, Target: target.Handle, Phase: 2}
-		p := sys.airPilotFor(u, n, 100)
+		p := sys.airPilotFor(u, n, tick-1)
 		p.fresh, p.standSet, p.standHeld = false, true, true
-		p.standX, p.standZ = int64(u.X>>16), int64(u.Z>>16)
-		p.standTick, p.standArrive = 100, priorArrival
-		// Prior arrival may equal the next plan's tick: an exposed point
-		// is replaced on the very visit that first records its arrival.
-		sys.airChooseStandoff(u, p, int64(target.X>>16), int64(target.Z>>16), 300, nil, false, 100)
-		u.X, u.Z = numeric.FixedFromInt(p.standX), numeric.FixedFromInt(p.standZ)
+		p.standX, p.standZ, p.standTick = int64(u.X>>16)+25, int64(u.Z>>16), tick-1
+		p.standVisit = tick - 1
 		random := *orders.QueueOfUnit(u).Binding().SimRNG
-		for _, tick := range []uint32{200, 244} {
-			sys.legAirToGroundHoverModern(u, n, tick)
-			if p.standTick != 100 || p.standArrive != 200 {
-				t.Fatalf("prior arrival=%d tick=%d: point changed before 45 ticks of dwell: planned=%d arrived=%d", priorArrival, tick, p.standTick, p.standArrive)
-			}
+		sys.legAirToGroundHoverModern(u, n, tick)
+		if p.standTick != tick-1 {
+			t.Fatal("gunship turned before reaching the arrival boundary")
 		}
-		sys.legAirToGroundHoverModern(u, n, 245)
-		if p.standTick != 245 || p.standX == int64(u.X>>16) && p.standZ == int64(u.Z>>16) {
-			t.Fatal("gunship did not slide on at the dwell boundary")
+		u.X += numeric.FixedFromInt(1)
+		sys.legAirToGroundHoverModern(u, n, tick+1)
+		if p.standTick != tick+1 || p.standX == int64(u.X>>16)+24 && p.standZ == int64(u.Z>>16) {
+			t.Fatal("gunship waited at the arrival boundary")
 		}
 		if *orders.QueueOfUnit(u).Binding().SimRNG != random {
 			t.Fatal("Modern standoff selection drew RNG")
@@ -108,8 +103,8 @@ func TestAirHoverRepositionMovesAcrossTargetBearing(t *testing.T) {
 }
 
 // Range eligibility does not establish a clear shot. A physical refusal
-// from the actual weapon visit participates in the gunship's existing retry
-// cadence; reload/aim/coordination waits supply no such observation.
+// from the actual weapon visit must redirect even outside the old sampling
+// window; reload/aim/coordination waits supply no such observation.
 func TestAirHoverUsesPhysicalRefusalForFiringPoint(t *testing.T) {
 	for _, blocked := range []bool{false, true} {
 		sys, w, u := wideAirFixture(t)
@@ -119,8 +114,8 @@ func TestAirHoverUsesPhysicalRefusalForFiringPoint(t *testing.T) {
 		n := &orders.Node{ID: orders.Lookup("AirToGroundHover"), Owner: u.Handle, Target: target.Handle, Phase: 2}
 		p := sys.airPilotFor(u, n, 100)
 		p.fresh, p.standSet, p.standHeld = false, true, true
-		p.standX, p.standZ = int64(u.X>>16), int64(u.Z>>16)
-		p.standTick, p.standArrive = 100, 99
+		p.standX, p.standZ = int64(u.X>>16), int64(u.Z>>16)+80
+		p.standTick, p.standVisit = 100, 100
 		previews := 0
 		q := orders.QueueOfUnit(u)
 		q.Binding().Weapons = orders.NewWeaponAdapter(orders.WeaponAdapterConfig{
@@ -142,14 +137,18 @@ func TestAirHoverUsesPhysicalRefusalForFiringPoint(t *testing.T) {
 			},
 		})
 		random := *q.Binding().SimRNG
-		sys.legAirToGroundHoverModern(u, n, 135)
-		if p.standTick != 100 {
-			t.Fatal("replanned before two refusals")
-		}
-		sys.legAirToGroundHoverModern(u, n, 150)
+		sys.legAirToGroundHoverModern(u, n, 101)
 		if blocked {
-			if p.standTick != 150 || p.standX >= int64(target.X>>16) || previews == 0 {
+			if p.standTick != 101 || p.standX >= int64(target.X>>16) || previews == 0 {
 				t.Fatal("physical refusal retained an obstructed firing point")
+			}
+			point := [2]int64{p.standX, p.standZ}
+			sys.legAirToGroundHoverModern(u, n, 102)
+			if p.standTick != 101 || point != [2]int64{p.standX, p.standZ} {
+				t.Fatal("repeated refusal abandoned an already-clear escape leg")
+			}
+			if p.refused != 0 {
+				t.Fatal("physical obstruction was counted as a range refusal")
 			}
 		} else if p.standTick != 100 || previews != 0 {
 			t.Fatal("a nonphysical wait searched for a new firing point")
@@ -157,6 +156,196 @@ func TestAirHoverUsesPhysicalRefusalForFiringPoint(t *testing.T) {
 		if *q.Binding().SimRNG != random {
 			t.Fatal("candidate previews drew RNG")
 		}
+	}
+}
+
+// Escaping an obstruction must not immediately select another blind firing
+// point. Reuse only a slide previewed clear between both endpoints, for the
+// same target geometry and threat picture (Modern aircraft tactics).
+func TestAirHoverKeepsClearSlideUntilConditionsChange(t *testing.T) {
+	for _, change := range []string{"none", "position", "target", "threats", "damage", "order", "visit-gap"} {
+		t.Run(change, func(t *testing.T) {
+			sys, w, u := wideAirFixture(t)
+			target := airTargetFor(t, sys, w, 64, 32)
+			u.InstallWeapon(0, &content.WeaponDef{ID: 1, Range: 360})
+			u.X, u.Z = target.X+240<<16, target.Z
+			n := &orders.Node{ID: orders.Lookup("AirToGroundHover"), Owner: u.Handle, Target: target.Handle, Phase: 2}
+			p := sys.airPilotFor(u, n, 100)
+			p.fresh = false
+			blocked := true
+			previews := 0
+			q := orders.QueueOfUnit(u)
+			q.Binding().Weapons = orders.NewWeaponAdapter(orders.WeaponAdapterConfig{
+				CanEngage:             func(*units.Unit, pool.Handle, int) bool { return true },
+				FiringPositionBlocked: func(*units.Unit, *units.Unit, uint32) bool { return blocked },
+				FiringPositionClear: func(_ *units.Unit, _ *units.Unit, _ uint32, x, y, z numeric.Fixed) bool {
+					previews++
+					return x < target.X
+				},
+			})
+			random := *q.Binding().SimRNG
+			sys.legAirToGroundHoverModern(u, n, 101)
+			if p.slideTarget != target {
+				t.Fatal("clear half-plane did not produce a reusable lateral slide")
+			}
+			a, b := [2]int64{p.standX, p.standZ}, [2]int64{p.slideX, p.slideZ}
+			u.X, u.Z = numeric.FixedFromInt(a[0]), numeric.FixedFromInt(a[1])
+			blocked, previews = false, 0
+			tick := uint32(102)
+			switch change {
+			case "position":
+				target.X++ // even a sub-unit target move invalidates the observation
+			case "target":
+				replacement := airTargetFor(t, sys, w, 70, 32)
+				replacement.X, replacement.Y, replacement.Z = target.X, target.Y, target.Z
+				n.Target = replacement.Handle
+			case "threats":
+				sys.airThreats[u.Owner].version++
+			case "damage":
+				u.Health--
+			case "order":
+				copy := *n
+				n = &copy
+			case "visit-gap":
+				tick++ // a retail-leg visit must not retain Modern movement goals
+			}
+			sys.legAirToGroundHoverModern(u, n, tick)
+			if change == "none" {
+				if [2]int64{p.standX, p.standZ} != b || [2]int64{p.slideX, p.slideZ} != a {
+					t.Fatal("arrival discarded the clear slide after firing resumed")
+				}
+			} else if p.slideTarget != nil {
+				t.Fatal("changed conditions retained the previous firing evidence")
+			}
+			if previews != 0 || *q.Binding().SimRNG != random {
+				t.Fatal("slide reuse or invalidation queried expired firing evidence or drew RNG")
+			}
+		})
+	}
+}
+
+func TestAirHoverFailedFiringSearchKeepsMovingUntilRetry(t *testing.T) {
+	for _, change := range []string{"wait", "position", "threats", "arrival"} {
+		t.Run(change, func(t *testing.T) {
+			sys, w, u := wideAirFixture(t)
+			target := airTargetFor(t, sys, w, 64, 32)
+			u.InstallWeapon(0, &content.WeaponDef{ID: 1, Range: 360})
+			u.X, u.Z = target.X+240<<16, target.Z
+			n := &orders.Node{ID: orders.Lookup("AirToGroundHover"), Owner: u.Handle, Target: target.Handle, Phase: 2}
+			p := sys.airPilotFor(u, n, 100)
+			p.fresh = false
+			previews := 0
+			orders.QueueOfUnit(u).Binding().Weapons = orders.NewWeaponAdapter(orders.WeaponAdapterConfig{
+				CanEngage:             func(*units.Unit, pool.Handle, int) bool { return true },
+				FiringPositionBlocked: func(*units.Unit, *units.Unit, uint32) bool { return true },
+				FiringPositionClear: func(*units.Unit, *units.Unit, uint32, numeric.Fixed, numeric.Fixed, numeric.Fixed) bool {
+					previews++
+					return false
+				},
+			})
+			sys.legAirToGroundHoverModern(u, n, 101)
+			if p.noClearTarget != target || previews == 0 {
+				t.Fatal("first physical refusal did not search immediately")
+			}
+			flight := sys.FlightCommandFor(u.Handle, u)
+			point, marker := [2]int64{p.standX, p.standZ}, flight.Payload
+			previews = 0
+			switch change {
+			case "position":
+				target.X++
+			case "threats":
+				sys.airThreats[u.Owner].version++
+			case "arrival":
+				u.X, u.Z = numeric.FixedFromInt(p.standX), numeric.FixedFromInt(p.standZ)
+			}
+			for tick := uint32(102); tick < 116; tick++ {
+				sys.legAirToGroundHoverModern(u, n, tick)
+				if change != "wait" {
+					if p.standTick != tick || previews == 0 {
+						t.Fatal("changed conditions retained an obsolete failed search")
+					}
+					return
+				}
+				if p.standTick != 101 || [2]int64{p.standX, p.standZ} != point || flight.Payload != marker || previews != 0 {
+					t.Fatal("all-blocked search churned its moving fallback before retry")
+				}
+			}
+			sys.legAirToGroundHoverModern(u, n, 116)
+			if p.standTick != 116 || previews == 0 {
+				t.Fatal("failed search did not retry after 15 ticks")
+			}
+		})
+	}
+}
+
+func TestAirHoverClearSlideMovesLaterallyInBothDirections(t *testing.T) {
+	for _, bearing := range []uint16{4096, 8192} {
+		sys, w, u := wideAirFixture(t)
+		target := airTargetFor(t, sys, w, 64, 32)
+		tx, tz := int64(target.X>>16), int64(target.Z>>16)
+		const weaponRange, minimum = int64(370), int64(120)
+		ax, az := airAlong(tx, tz, 0, weaponRange*2/3)
+		bx, bz := airAlong(tx, tz, bearing, weaponRange*17/20)
+		u.X, u.Z = numeric.FixedFromInt(ax+1000), numeric.FixedFromInt(az)
+		n := &orders.Node{ID: orders.Lookup("AirToGroundHover"), Target: target.Handle}
+		p := sys.airPilotFor(u, n, 100)
+		points := make(map[[2]numeric.Fixed]bool)
+		for k := int64(0); k <= 4; k++ {
+			points[[2]numeric.Fixed{numeric.FixedFromInt(ax + (bx-ax)*k/4), numeric.FixedFromInt(az + (bz-az)*k/4)}] = true
+		}
+		orders.QueueOfUnit(u).Binding().Weapons = orders.NewWeaponAdapter(orders.WeaponAdapterConfig{
+			FiringPositionBlocked: func(*units.Unit, *units.Unit, uint32) bool { return true },
+			FiringPositionClear: func(_ *units.Unit, _ *units.Unit, _ uint32, x, y, z numeric.Fixed) bool {
+				return points[[2]numeric.Fixed{x, z}]
+			},
+		})
+		sys.airChooseStandoff(u, p, tx, tz, weaponRange, nil, true, 100)
+		if bearing == 4096 {
+			// This mixed-ring pair moves 120 units laterally one way, but
+			// only 94 on return. It must remain a single escape point.
+			if p.slideTarget != nil {
+				t.Fatal("accepted a return leg below the lateral floor")
+			}
+			continue
+		}
+		if p.slideTarget == nil {
+			t.Fatal("rejected a clear mixed-ring pair with two lateral legs")
+		}
+		dx, dz := p.slideX-p.standX, p.slideZ-p.standZ
+		cross := abs64(dx*(p.standZ-tz) - dz*(p.standX-tx))
+		for _, point := range [][2]int64{{p.standX, p.standZ}, {p.slideX, p.slideZ}} {
+			rx, rz := point[0]-tx, point[1]-tz
+			if cross < minimum*isqrt64(rx*rx+rz*rz) {
+				t.Fatal("retained slide fails a directional lateral floor")
+			}
+		}
+	}
+}
+
+func TestAirHoverClearEndpointsDoNotProveClearSlide(t *testing.T) {
+	sys, w, u := wideAirFixture(t)
+	target := airTargetFor(t, sys, w, 64, 32)
+	n := &orders.Node{ID: orders.Lookup("AirToGroundHover"), Target: target.Handle}
+	p := sys.airPilotFor(u, n, 100)
+	// Only the discrete endpoints are clear; every connecting segment has
+	// blocked interior samples. A pilot may escape to one, but cannot shuttle
+	// between two of them on the strength of those endpoints alone.
+	points := make(map[[2]numeric.Fixed]bool)
+	for _, radius := range []int64{240, 306} {
+		for j := 0; j < 16; j++ {
+			x, z := airAlong(int64(target.X>>16), int64(target.Z>>16), uint16(j*4096), radius)
+			points[[2]numeric.Fixed{numeric.FixedFromInt(x), numeric.FixedFromInt(z)}] = true
+		}
+	}
+	orders.QueueOfUnit(u).Binding().Weapons = orders.NewWeaponAdapter(orders.WeaponAdapterConfig{
+		FiringPositionBlocked: func(*units.Unit, *units.Unit, uint32) bool { return true },
+		FiringPositionClear: func(_ *units.Unit, _ *units.Unit, _ uint32, x, y, z numeric.Fixed) bool {
+			return points[[2]numeric.Fixed{x, z}]
+		},
+	})
+	sys.airChooseStandoff(u, p, int64(target.X>>16), int64(target.Z>>16), 360, nil, false, 100)
+	if !points[[2]numeric.Fixed{numeric.FixedFromInt(p.standX), numeric.FixedFromInt(p.standZ)}] || p.slideTarget != nil {
+		t.Fatal("point selection lost its clear fallback or joined obstructed endpoints")
 	}
 }
 

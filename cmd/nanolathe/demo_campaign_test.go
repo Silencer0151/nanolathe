@@ -193,7 +193,7 @@ func TestCampaignFallbackContinuationKeepsSelectedMission(t *testing.T) {
 		if err := g.applyRetailContinuation(&session.RetailCampaignContinuation{
 			CampaignPath: "camps/arm.tdf", MissionIndex: 1, Side: 0,
 			Thumbs: [25]byte{'W', 'U'},
-		}); err != nil {
+		}, nil); err != nil {
 			t.Fatal(err)
 		}
 		if g.audioOwner != nil {

@@ -79,7 +79,7 @@ var economyCallbackSlots = []struct {
 		func(s *Service, a *checkpoint.BindingAuthority) { s.SetCloakDueWithCheckpointBinding(nil, a) },
 	},
 	{
-		"EndCondition", 146,
+		"EndCondition", 147,
 		func(s *Service, a *checkpoint.BindingAuthority) {
 			s.SetEndConditionWithCheckpointBinding(func(int, uint32) { panic("capture called EndCondition") }, a)
 		},
@@ -90,10 +90,10 @@ var economyCallbackSlots = []struct {
 }
 
 func TestCheckpointEconomyBindingPresenceVector(t *testing.T) {
-	// Independent zero-state layout: cloak tags (2), Community (143), selector,
+	// Independent zero-state layout: cloak tags (2), Community (144), selector,
 	// end-condition and network tags (3), players (10*203), reference (8),
 	// terrain/wind tags (2), and physical bucket count (4).
-	want := make([]byte, 2192)
+	want := make([]byte, 2193)
 	s := &Service{}
 	a := checkpoint.NewBindingAuthority()
 	c := economyBoundContext(t, s, a)
@@ -116,7 +116,7 @@ func TestCheckpointEconomyBindingPresenceVector(t *testing.T) {
 	}
 	s.Wind = &world.Wind{Strength: 700, NextChange: 123}
 	c = economyBoundContext(t, s, a)
-	want[2187] = 1
+	want[2188] = 1
 	if got := economyBoundCheckpointBytes(t, s, c); !bytes.Equal(got, want) {
 		t.Fatalf("wind presence payload = %x, want %x", got, want)
 	}

@@ -159,6 +159,7 @@ type Features struct {
     MapFeatureOwnerEleven     bool // terrain-file features stamped owner 11, drawn without LOS
     ResurrectionTextFix       bool // "Resurrection failed" spelling
     HealTimeBitmask           bool // historical passive caller: low-byte mask, signed 32*h/30 work
+    AIDifficultyReversed      bool // TA: Escalation: stored difficulty index 0 plays Hard, 2 Easy (§4.8)
 
     // Parameters: zero means "as retail" for every one of them.
     RepairRate                RepairRate // CP-DMG-4: Enabled, RepairMultiplier, SelfHealMultiplier (1..100)
@@ -489,6 +490,53 @@ east/west shipyards, so neither is implemented
 ([ProTA 4.8 engine package](../research/extensions/prota-engine.md#unknown)).
 ProTA's config enables all five switches in its `communityFeatures`.
 
+### 4.8 TA: Escalation difficulty order
+
+TA: Escalation's patched executable swaps the difficulty name slots, so a
+stored difficulty index of 0 selects Hard and 2 Easy, and reorders its income
+table to match
+([TA: Escalation engine, "AI"](../research/extensions/taesc-engine.md)). The
+content agrees: every difficulty control it ships (skirmish, new game,
+restart, end of mission) spells its stages `Hard|Medium|Easy`, and its
+`ai/default.txt` notes beside `Plan easy` and `Plan hard` that the plans are
+"swapped in skirmish GUI to allow proper multiplier". Escalation's config
+turns the switch on.
+
+| Contract | Owner / where the rule lives | Strict | Community (switch on) |
+|---|---|---|---|
+| Difficulty order (`AIDifficultyReversed`) | `session.DifficultyTier` (`internal/session/composition.go`), read with the entry table by the Classic plan gate and Modern persona (`ControllerDifficulty`), with the initial resolved table by the AI-parameter layer, and with the current table by the ledger and construction refunds; the battle Game Options, online lobby and Load Game labels read the same helper | the stored index is the tier, 0 easy, 1 medium, 2 hard `[08 R-AI-01 §12]` `[05 R-ECO-01 §3]` | the stored index `i` plays tier `2 - i`; the setup, the lobby, the save summary and the menus keep the index as stored, so a save keeps its meaning and the content's own `Hard\|Medium\|Easy` stages show the tier played |
+
+The income factors themselves stay the selected rule set's; Escalation's own
+Easy/Medium/Hard `1/2/4` table is a separate contract this switch does not add.
+Campaign schema choice still takes the stored index in retail's order:
+whether the swapped slots reorder it too is Unknown.
+
+AI plan/persona and merged AI parameters remain battle-entry choices across
+rule switches, as the existing Modern AI controller contract requires
+([DESIGN_SESSIONS_AI_SAVE, "Switching"](DESIGN_SESSIONS_AI_SAVE.md#modern-ai-computer-player)).
+`sessionAIDifficulty` and `sessionAIDifficultyFor` read the retained
+`EntryCommunity` table; restore rebuilds the same profile from that recorded
+table. A zero entry table is a real Strict entry, even if current rules later
+reverse the index. Income/refunds continue following the current bound rules;
+this does not retune or restart a controller or change its merged parameters.
+
+The battle Game Options and Load Game difficulty labels name that entry AI
+tier. For an in-battle save, Load Game reads its recorded `community.entry`
+table. A between-missions continuation instead names the next mission, which
+starts fresh under the recorded current rule set and Community sources; its
+label resolves that selection with the same rule-set fallback as load. The
+loaded briefing captures the saved sources for its Start action without
+changing the host's Community preferences; a later fresh briefing uses the
+host's sources (DESIGN_MODS_MUTATORS §7.3).
+The `BetweenMissions` scalar's presence selects this route, including a present
+zero payload; an absent scalar selects battle restoration. This changes no
+campaign schema selection or difficulty index.
+Mounted content, current preferences and a running battle do not affect it.
+With no sidecar it uses the retail index order; an unreadable sidecar leaves
+the difficulty label empty. This display fallback does not change the
+no-sidecar restore policy. Online lobby rows use the room's effective table,
+which will become the battle's entry table.
+
 ## 5. Content interface
 
 Every author-facing key the patch reads is parsed onto the compiled
@@ -616,8 +664,24 @@ reads the service's projected table copy. Modern embeds Community.
 - **Table identity locks.** The resolved table for retail content under
   Community 3.9 equals the embedded `prota` table; under Strict it is zero
   whatever the sources say; a mod config's `communityFeatures` resolves to
-  exactly the value the removed table and profile produced (digests locked);
+  exactly the value the removed table and profile produced (digests locked),
+  plus only the explicitly declared post-migration additions in
+  `shippedConfig.added`. Escalation's difficulty reversal is that config's
+  sole addition; the frozen replica still matches its original digest;
   a settings override wins over the config and the command line over both.
+- **Escalation difficulty order (§4.8).** `TestDifficultyTierReversesOnlyUnderTheSwitch`,
+  `TestReversedSeatWordsReachEveryReader` and
+  `TestEscalationConfigPlaysIndexZeroHard` lock the plan/persona, ledger and
+  refund interpretation and Strict bypass. The parameter-layer and codec
+  matrix keeps all three stored indices under every reserved mode;
+  `TestReversedDifficultySurvivesSaveRestore` keeps the raw bank index and
+  recorded rules after a mode switch. The host tests select saves under
+  opposing current rules and check the room's effective labels.
+  `TestContinuationDifficultyMatchesBriefingStart` follows the loaded
+  continuation through Start with opposing current overrides, including a
+  present-zero marker, then checks that fresh briefings and sidecar-free
+  continuations still use the host's sources. Checkpoint schema 6 retains
+  the flag explicitly in every full table copy.
 - **ProTA package switches (§4.7).** The mainline table leaves them false and
   keeps its digest; a config's `communityFeatures` enables them and a later source
   disables them field by field; Strict projects zero onto the economy, combat

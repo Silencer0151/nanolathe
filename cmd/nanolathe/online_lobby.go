@@ -765,7 +765,7 @@ func (g *gameShell) refreshOnlineComputerRow(row, k int, color uint8, teams []ui
 	p.SetActive("Metal"+suffix, false)
 	p.SetText("Energy"+suffix, "")
 	p.SetActive(lobbyLevel+suffix, true)
-	p.SetText(lobbyLevel+suffix, onlineDifficultyName(c.Difficulty))
+	p.SetText(lobbyLevel+suffix, onlineDifficultyName(session.DifficultyTier(r.baseReq.Community, int(c.Difficulty))))
 	switch {
 	case r.isHost() && r.lobbyEditable():
 		if c.Kind == ai.ControllerModern {
@@ -815,9 +815,10 @@ func (g *gameShell) refreshOnlineAddRow(row int) {
 	}
 }
 
-// onlineDifficultyName is a computer's difficulty in the setup screen's words.
-func onlineDifficultyName(difficulty uint8) string {
-	return gameOptionsDifficulty[min(int(difficulty), len(gameOptionsDifficulty)-1)]
+// onlineDifficultyName is a difficulty tier (session.DifficultyTier) in the
+// setup screen's words.
+func onlineDifficultyName(tier int) string {
+	return gameOptionsDifficulty[min(max(tier, 0), len(gameOptionsDifficulty)-1)]
 }
 
 // refreshOnlineLobbySettings writes the host's settings with the setup

@@ -1954,9 +1954,17 @@ loading-screen lines (§8.3).
 
 **Continuation saves.** A between-missions save starts the next mission
 fresh, so what it takes from its sidecar is the selection that mission is
-entered under: the mod (step 2), the mutators, the rule set and the unit
-limit. Its Community sources are not carried forward; the fresh entry
-resolves the host's, as every new battle does.
+entered under: the mod (step 2), the mutators, the rule set, the unit limit
+and the recorded Community sources. The loaded briefing's Start action
+resolves those sources under the recorded current rule set, rather than
+reusing the previous mission's entry table. Strict still projects a zero
+table. This Nanolathe save policy keeps the Load Game difficulty label and
+the next mission's AI tier consistent (DESIGN_COMMUNITY_PATCH §4.8).
+The sources belong only to that briefing; they do not overwrite the host's
+Community preferences. Leaving it and opening a fresh briefing, or loading
+a continuation without a sidecar, uses the host's current sources.
+`TestContinuationDifficultyMatchesBriefingStart` exercises the load-to-Start
+handoff, the present-zero continuation marker and both fresh-entry paths.
 
 ### 7.4 Contracts this replaces
 

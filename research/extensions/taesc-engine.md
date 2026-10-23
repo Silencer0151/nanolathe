@@ -671,6 +671,13 @@ that every case below has passed:
 
 ## Unknown
 
+- **Unknown — campaign schema difficulty order in Gold 10.2.0.** The reversed
+  difficulty slots establish the AI tier ordering, but do not settle whether
+  campaign OTA schema choice follows the same reversal. A manual campaign
+  case with distinguishable schemas at each difficulty, or primary
+  documentation or appropriately licensed source describing that selector,
+  would settle it. Nanolathe keeps retail's stored-index schema selection
+  pending that evidence.
 - **Unknown — the snap override key's default.** The key code is configurable
   and the changelog names a default, but the shipped default value could not be
   read from the configuration surface.

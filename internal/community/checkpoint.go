@@ -14,6 +14,8 @@ func (f Features) WriteCheckpoint(e *checkpoint.Encoder) error {
 	e.Bool(f.AIBuilderStopThreshold)
 	e.Field("community.Features.AIDifficultyIncome")
 	e.Bool(f.AIDifficultyIncome)
+	e.Field("community.Features.AIDifficultyReversed")
+	e.Bool(f.AIDifficultyReversed)
 	e.Field("community.Features.AIStockpileProducts")
 	e.Bool(f.AIStockpileProducts)
 	e.Field("community.Features.AirCorpseFall")

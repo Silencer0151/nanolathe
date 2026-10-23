@@ -79,7 +79,7 @@ func TestMovementCheckpointHandlersLazyPresenceVectorAndPurity(t *testing.T) {
 	// Authored prefix through airLegHandler: the constructed null-handle rows
 	// each contain one nil; all ten air-base lists are empty (§16.3.14/.64).
 	prefix := movementCheckpointVector(t,
-		uint8(0), uint8(0), uint32(1), uint8(0), [143]uint8{}, uint8(0), [16]uint8{}, uint32(1), uint8(0),
+		uint8(0), uint8(0), uint32(1), uint8(0), [144]uint8{}, uint8(0), [16]uint8{}, uint32(1), uint8(0),
 		uint8(0), uint8(1), int64(1), int32(1), uint16(6), uint32(0), uint8(0), uint32(1), uint8(0),
 		uint8(0), uint8(1), uint32(1), uint8(0), uint8(0), uint32(1), uint8(0), [10]uint32{}, uint8(1))
 	after := movementPathBindingBytes(t, s, c)

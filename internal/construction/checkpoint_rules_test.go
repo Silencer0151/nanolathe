@@ -49,9 +49,9 @@ func TestCheckpointRulesOwnerTags(t *testing.T) {
 	c, _ := constructionCheckpointFixture(t)
 	s := &Service{}
 	baseline := constructionCheckpointBytes(t, s, c)
-	// Four bindings, Community (143), three bindings, ModeSelector (i64),
+	// Four bindings, Community (144), three bindings, ModeSelector (i64),
 	// then the five ModelForFactory through Presentation binding bytes.
-	const ruleOffset = 163
+	const ruleOffset = 164
 	if baseline[ruleOffset] != 0 {
 		t.Fatal("nil rules lost their zero tag")
 	}

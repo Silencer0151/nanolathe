@@ -4,6 +4,7 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/camera"
 	presentationrender "github.com/nanolathe-gg/nanolathe/internal/render"
 	"github.com/nanolathe-gg/nanolathe/internal/sim/numeric"
+	"github.com/nanolathe-gg/nanolathe/internal/world"
 )
 
 // Model shadows [R-REN-03D]. Diggers and ordinary mobiles flatten the finished
@@ -228,6 +229,28 @@ func (c *Client) buildSilhouetteShadow(draw *presentationrender.UnitDraw, body *
 		img.eraseAtOrBelow(threshold)
 	}
 	return img
+}
+
+// unitShadowGroundHeight keeps an Enhanced aircraft's receiver at the nearest
+// valid terrain sample when its position leaves the bilinear domain. Retail
+// uses the sentinel as a height and jumps downward [03 R-REN-03D §3]; Original
+// keeps that placement, including the classic half of comparison captures.
+// This extends only the shadow receiver, never the body or the shared terrain
+// query (DESIGN_GPU_RENDERER §34.1).
+func (c *Client) unitShadowGroundHeight(x, z numeric.Fixed, airborne bool) numeric.Fixed {
+	h := c.groundHeightUnder(x, z)
+	if !c.enhanced || !c.geometryOnlyModels || !airborne || h != -1 {
+		return h
+	}
+	t := c.terrain
+	if t == nil || t.CellW < 2 || t.CellH < 2 {
+		return h
+	}
+	// The last row/column has no next neighbour. Stop one fixed-point step
+	// before it, preserving the final valid pixel's interpolation and rounding.
+	x = max(0, min(x, world.CellToWorld(t.CellW-1)-1))
+	z = max(0, min(z, world.CellToWorld(t.CellH-1)-1))
+	return t.HeightAt(x, z)
 }
 
 // shadowAnchor places the shadow. It uses the same X as the body plus five

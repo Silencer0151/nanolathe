@@ -54,10 +54,10 @@ func TestCheckpointEconomyVector(t *testing.T) {
 		}
 		return b
 	}
-	// Two absent cloak ports, the shared table's 143-byte all-zero value,
+	// Two absent cloak ports, the shared table's 144-byte all-zero value,
 	// selector presence/i64, absent end-condition port, networked Boolean.
 	want := decode("0000")
-	want = append(want, make([]byte, 143)...)
+	want = append(want, make([]byte, 144)...)
 	want = append(want, decode("010500000000ffffff0001")...)
 	const player = "0000803f00000040" + "0000404000008040" + "01000000000000000001" +
 		"0000a0400000c0400000e04000000041" + "010001" + "0000104100002041" +
@@ -216,19 +216,19 @@ func TestCheckpointEconomyExclusionsAndPurity(t *testing.T) {
 
 func TestCheckpointEconomyFloatBits(t *testing.T) {
 	s := &Service{}
-	// Standalone empty-service framing is 148 bytes before its first player;
+	// Standalone empty-service framing is 149 bytes before its first player;
 	// Stock[Energy] is at byte 137, TotalConsumed[Energy] at byte 158 in a row.
 	for _, bits := range []uint32{0, 1 << 31, 1, 0x007fffff, 0x7f7fffff, 0x7f800000, 0xff800000} {
 		s.Players[0].Stock[Energy] = math.Float32frombits(bits)
 		got := economyCheckpointBytes(t, s)
-		if read := binary.LittleEndian.Uint32(got[148+137:]); read != bits {
+		if read := binary.LittleEndian.Uint32(got[149+137:]); read != bits {
 			t.Fatalf("binary32 = %08x, want %08x", read, bits)
 		}
 	}
 	for _, bits := range []uint64{0, 1 << 63, 1, 0x000fffffffffffff, 0x7fefffffffffffff, 0x7ff0000000000000, 0xfff0000000000000} {
 		s.Players[0].TotalConsumed[Energy] = math.Float64frombits(bits)
 		got := economyCheckpointBytes(t, s)
-		if read := binary.LittleEndian.Uint64(got[148+158:]); read != bits {
+		if read := binary.LittleEndian.Uint64(got[149+158:]); read != bits {
 			t.Fatalf("binary64 = %016x, want %016x", read, bits)
 		}
 	}

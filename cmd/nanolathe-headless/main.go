@@ -227,7 +227,7 @@ func parse(args []string, output io.Writer) (headless.Request, string, profileOp
 		return nil
 	})
 	flags.StringVar(&request.Mission, "mission", "", "campaign selector, e.g. camps/Arm Campaign.tdf:MISSION0")
-	flags.IntVar(&request.Difficulty, "difficulty", 1, "battle difficulty: 0 easy, 1 medium, 2 hard (skirmish and campaign)")
+	flags.IntVar(&request.Difficulty, "difficulty", 1, "battle difficulty as a setup stores it: 0 easy, 1 medium, 2 hard (skirmish and campaign); a mod whose Community table sets aiDifficultyReversed, as Escalation's does, plays it reversed")
 	flags.Int64Var(&seed, "seed", -1, "seed for both deterministic streams; negative derives a pair from the clock")
 	flags.Int64Var(&ticks, "ticks", 0, "authoritative tick limit (0 = 18000)")
 	flags.StringVar(&reportPath, "report", "", "JSON report path (default stdout)")

@@ -69,6 +69,12 @@ type Features struct {
 	// Historical executable caller, selected by a mod config separately
 	// from the repair helper's contribution and multiplier configuration.
 	HealTimeBitmask bool `json:"healTimeBitmask,omitempty"`
+	// TA: Escalation's patched executable swaps the difficulty name slots, so
+	// a stored difficulty index of 0 plays Hard and 2 Easy, and its menus
+	// spell the stages Hard|Medium|Easy to match
+	// (research/extensions/taesc-engine.md "AI"). The index is still what a
+	// setup and a save store; only its reading reverses (session.DifficultyTier).
+	AIDifficultyReversed bool `json:"aiDifficultyReversed,omitempty"`
 	// Zero leaves the reposition threshold unchanged; zero preserves the
 	// existing retail/ProTA placement choice.
 	AIBuilderPlacementLimit int `json:"aiBuilderPlacementLimit,omitempty"`

@@ -72,13 +72,13 @@ func runtimeCheckpointVectorFixture(t *testing.T) *Session {
 
 // Authored byte groups fix section-prefix framing, all top-level field widths
 // and lexical order. Nested nonzero vectors below do not call the codec to
-// construct expectations. Zero Community tables have 31 bools and 14 i64s.
+// construct expectations. Zero Community tables have 32 bools and 14 i64s.
 func TestCheckpointRuntimeVector(t *testing.T) {
 	s := runtimeCheckpointVectorFixture(t)
 	zero := func(n int) string { return strings.Repeat("00", n) }
 	want := runtimeCheckpointHex(t,
 		"03 ffffffff feffffff 78563412", // boundary, campaign, tick
-		"01 ffffffffffffffff", zero(134), "01 09", "00 0200000000000000", zero(134), "01000000 67 2381 feff 02 03",
+		"01 ffffffffffffffff", zero(135), "01 09", "00 0200000000000000", zero(135), "01000000 67 2381 feff 02 03",
 		zero(52),                                          // Meteor: 3 bools, eleven i32/u32, absent weapon, empty name
 		zero(24),                                          // twelve raw factors
 		"ffffffffffffffff", zero(24), "aa", zero(9), "bb", // Progress

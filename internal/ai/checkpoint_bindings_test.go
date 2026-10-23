@@ -187,7 +187,7 @@ func TestCheckpointManagerBindingsVector(t *testing.T) {
 	}
 	put(uint32(0x01020304))
 	put([2]byte{1, 1}) // seed, CanPursueAir, Catalog
-	put([143]byte{})   // Community
+	put([144]byte{})   // Community
 	put([2]byte{})
 	put(uint32(0))
 	put([10]uint32{}) // rules, controller, params, deadlines
@@ -534,9 +534,9 @@ func TestCheckpointManagerBindingsRallyOneShot(t *testing.T) {
 }
 
 // A single present slot pins its exact lexical position independently of the
-// all-present vector. Optional Profile is absent in this 458-byte fixture.
+// all-present vector. Optional Profile is absent in this 459-byte fixture.
 func TestCheckpointManagerBindingsSlotPositions(t *testing.T) {
-	positions := [...]int{4, 238, 239, 265, 267, 268, 269, 367, 368, 348, 356}
+	positions := [...]int{4, 239, 240, 266, 268, 269, 270, 368, 369, 349, 357}
 	for i, slot := range managerBindingSlots() {
 		t.Run(slot.name, func(t *testing.T) {
 			f := newManagerBindingFixture(t)
@@ -544,9 +544,9 @@ func TestCheckpointManagerBindingsSlotPositions(t *testing.T) {
 			if err := f.register(); err != nil {
 				t.Fatal(err)
 			}
-			want := make([]byte, 458)
+			want := make([]byte, 459)
 			// Catalog, Factory's table ID, OrderBinding, RNG, Strategic.Catalog, Survival.
-			for _, index := range []int{5, 196, 244, 266, 279, 365, positions[i]} {
+			for _, index := range []int{5, 197, 245, 267, 280, 366, positions[i]} {
 				want[index] = 1
 			}
 			if got := aiCheckpointBytes(t, f.m, f.c); !bytes.Equal(got, want) {

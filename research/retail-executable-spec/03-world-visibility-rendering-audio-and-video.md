@@ -1963,6 +1963,15 @@ height in the shear ([R-REN-03A §9]). So the shadow sits **five pixels right of
 the body** and is sheared by the ground rather than by the model, which is what
 makes a shadow slide up a slope while the unit stays put.
 
+**Established (direct-static):** placement consumes the bilinear terrain query
+without testing its off-map sentinel or flooring it at sea level. The query
+returns `−1` outside its valid rectangle, including the final plot row and
+column [R-TERR-01 §4]. Since `−1 >> 1` is `−1`, crossing from a valid terrain
+height `h` to that sentinel moves the shadow down by `(h >> 1) + 1` pixels,
+in addition to the unit's ordinary movement. The body's height shear still
+uses the unit's own altitude. Both mobile silhouette branches have this
+discontinuity, and re-entering the valid rectangle restores the terrain shear.
+
 ##### 4. The tinted blitter is an `ALP` blend
 
 The blitter every shadow goes through is, per destination pixel:

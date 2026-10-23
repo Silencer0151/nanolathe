@@ -17,7 +17,7 @@ func TestMovementCheckpointSystemFramingVector(t *testing.T) {
 		tick: 13, unreachableLive: -14, workSmooth: -15, workTick: -16}
 	got := movementCheckpointBytes(t, s)
 	want := movementCheckpointVector(t,
-		uint8(0), uint8(0), uint32(0), [143]uint8{}, uint8(0), [16]uint8{}, uint32(0), uint8(0), uint8(1), int64(-1), int32(2), uint16(6), uint32(0), uint8(0),
+		uint8(0), uint8(0), uint32(0), [144]uint8{}, uint8(0), [16]uint8{}, uint32(0), uint8(0), uint8(1), int64(-1), int32(2), uint16(6), uint32(0), uint8(0),
 		uint32(0), uint8(0), uint8(0), uint32(0), uint8(0), uint32(0), [10]uint32{}, uint8(0), uint32(0), uint32(0),
 		uint32(2), uint32(5), uint32(6), uint32(0), uint8(0), uint8(0), uint32(0), uint64(7), uint8(0), uint32(2), uint8(1), uint8(0),
 		uint32(1), uint32(8), uint32(1), uint32(9), int64(-10), uint32(0), uint32(1), int64(-11), uint32(1), int64(-12),

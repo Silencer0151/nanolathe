@@ -43,12 +43,12 @@ func checkpointBindingRefusal(t *testing.T, b *QueueBinding, c *CheckpointContex
 }
 
 // This oracle uses literal schema positions and the separately specified
-// Community width (31 bools and fourteen i64s). No production writer or
+// Community width (32 bools and fourteen i64s). No production writer or
 // reflection supplies the expected field order. Adapter nil means absent.
 func checkpointBindingVector(q [14]byte, movement, presentation, weapons, work, world []byte, economyTag, rules, simTag byte, features []byte) []byte {
 	out := []byte{1, q[0], q[1]}
 	if features == nil {
-		features = make([]byte, 143)
+		features = make([]byte, 144)
 	}
 	out = append(out, features...)
 	out = append(out, q[2], q[3], q[4], q[5], q[6], q[7], economyTag, q[8], q[9], q[10])
@@ -313,7 +313,7 @@ func TestCheckpointBindingRulesCommunityAndPurity(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Literal complete nested record, retaining high/negative Go int bits.
-	features := checkpointHex(t, "01"+"0000000000010000"+"0001"+"000000000000000000"+
+	features := checkpointHex(t, "01"+"0000000000010000"+"0001"+"00"+"000000000000000000"+
 		"feffffffffffffff"+"0000000000000000"+"0000000000"+
 		"0000000000000000000000000000000000000000000000000000000000000000"+
 		"00"+"0000000000000000"+"00"+"01fdffffffffffffff0000000000020000"+

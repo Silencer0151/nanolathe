@@ -37,6 +37,13 @@ func TestGunshipsSlideAndFireThroughRealFlight(t *testing.T) {
 				if scenario == "crystal-patrol" {
 					targets = append(targets, s.spawn(t, 1, "CORLLT", labVec{c.X + 160, c.Z + 160}))
 				}
+				// This is a firing fixture: use the ordinary Hold Fire stance
+				// on its targets without healing away damage before the pilot
+				// can observe it. Ordinary friendly damage remains possible.
+				// The separate missile regression leaves both sides firing.
+				for _, u := range targets {
+					u.Flags &^= units.StandingFieldMask << units.StandingFireShift
+				}
 				// An authored, indestructible crystal blocks the westward firing
 				// line. The test leaves physical shot admission intact: the pilot
 				// must move around it, not fire through it.
@@ -67,7 +74,9 @@ func TestGunshipsSlideAndFireThroughRealFlight(t *testing.T) {
 					}
 				}
 				type observation struct {
+					minHealth                                          int32
 					bursts, lateral, radial, stationary, maxStationary int
+					dry, maxDry                                        int
 					pellets                                            [windows]int
 					travel                                             float64
 					prevReload                                         int32
@@ -77,6 +86,7 @@ func TestGunshipsSlideAndFireThroughRealFlight(t *testing.T) {
 				for i, u := range air {
 					obs[i].prev = labPos(u)
 					obs[i].prevReload = u.SlotAt(0).Reload
+					obs[i].minHealth = u.Health
 				}
 				trace := openTraceFile(t, rules+"_"+scenario+"_gunships.csv")
 				if trace != nil {
@@ -85,9 +95,9 @@ func TestGunshipsSlideAndFireThroughRealFlight(t *testing.T) {
 				participants := append(append([]*units.Unit{}, targets...), air...)
 				targetPrev, targetTravel := labPos(target), 0.0
 				for tick := 0; tick < approachTicks+windowTicks*windows; tick++ {
-					// Keep stock targets and aircraft alive so the full observation
-					// window measures attacking, not idle flight after a kill.
-					for _, u := range participants {
+					// Keep only targets alive. Aircraft health must remain visible
+					// to the pilot and ordinary reload calculation.
+					for _, u := range targets {
 						u.Health = u.Def.MaxDamage
 					}
 					h.Step(1)
@@ -101,6 +111,7 @@ func TestGunshipsSlideAndFireThroughRealFlight(t *testing.T) {
 					}
 					for i, u := range air {
 						o := &obs[i]
+						o.minHealth = min(o.minHealth, u.Health)
 						pos := labPos(u)
 						dx, dz := pos.X-o.prev.X, pos.Z-o.prev.Z
 						pellets := 0
@@ -114,6 +125,12 @@ func TestGunshipsSlideAndFireThroughRealFlight(t *testing.T) {
 						}
 						if tick >= approachTicks {
 							o.pellets[(tick-approachTicks)/windowTicks] += pellets
+							if pellets > 0 {
+								o.dry = 0
+							} else {
+								o.dry++
+								o.maxDry = max(o.maxDry, o.dry)
+							}
 							if u.SlotAt(0).Reload > o.prevReload {
 								o.bursts++
 							}
@@ -154,22 +171,17 @@ func TestGunshipsSlideAndFireThroughRealFlight(t *testing.T) {
 					t.Fatalf("moving-target fixture travelled only %.1f world units", targetTravel)
 				}
 				for i, o := range obs {
-					t.Logf("air%d bursts=%d pellets=%v lateral=%d radial=%d longestStop=%d travel=%.1f", i, o.bursts, o.pellets, o.lateral, o.radial, o.maxStationary, o.travel)
+					t.Logf("air%d bursts=%d pellets=%v lateral=%d radial=%d longestStop=%d longestDry=%d minHealth=%d travel=%.1f", i, o.bursts, o.pellets, o.lateral, o.radial, o.maxStationary, o.maxDry, o.minHealth, o.travel)
 					// A group's total can hide one permanently blocked gunship.
 					// Observe real pellets, not only reload or chosen waypoints.
-					for window, pellets := range o.pellets {
-						if pellets == 0 {
-							t.Errorf("air%d fired no projectile during settled window%d (%d ticks)", i, window, windowTicks)
-						}
-					}
+					assertGunshipEmission(t, fmt.Sprintf("air%d", i), air[i], o.minHealth, windowTicks, o.pellets[:], o.maxDry)
 					if o.lateral <= o.radial {
 						t.Errorf("air%d mostly moved radially: lateral=%d radial=%d", i, o.lateral, o.radial)
 					}
-					// Modern's documented replan bound is 240 ticks, including
-					// the ordinary 45-tick dwell. Neither mode may remain parked
-					// for that entire interval while this target stays alive.
-					if o.maxStationary >= windowTicks {
-						t.Errorf("air%d stayed still for %d ticks", i, o.maxStationary)
+					// Permit the brief deceleration at a reversal, but not the
+					// former Modern dwell's approximately one-second near-stop.
+					if o.maxStationary > gunshipMaxNearStop {
+						t.Errorf("air%d stayed still for %d ticks, limit %d", i, o.maxStationary, gunshipMaxNearStop)
 					}
 				}
 			})

@@ -16,6 +16,12 @@ import (
 )
 
 func (g *gameShell) openCampaignBriefing() {
+	g.openCampaignBriefingWithSources(nil)
+}
+
+// Saved sources belong to this briefing's Start action, not the host's next
+// fresh mission or preferences (DESIGN_MODS_MUTATORS §7.3).
+func (g *gameShell) openCampaignBriefingWithSources(sources *session.CommunitySources) {
 	if g == nil || g.cs == nil || g.cs.fs == nil || g.campaignIdx < 0 || g.campaignIdx >= len(g.campaignOptions) {
 		reportRetailMessageError(g.showRetailMessage("no campaign selected"))
 		return
@@ -39,6 +45,9 @@ func (g *gameShell) openCampaignBriefing() {
 		g.saveSettings()
 		identity := fmt.Sprintf("%s:MISSION%d", campaign.Path, missionIndex)
 		request, err := missionBattleRequest(g.opts, g.cs, identity, g.missionDifficulty(), missionIndex, missionIndex, nil, battleSeeds)
+		if sources != nil {
+			request.value.CommunitySources = *sources
+		}
 		request.value.SelectedSide, request.value.SelectedSideSet = g.missionSide, true
 		return request, err
 	}
@@ -124,7 +133,7 @@ func (g *gameShell) briefingTextHeight() int {
 // campaign-selection state used by NEWGAME and then enters the authored
 // briefing. It never constructs a battle directly: Start remains the typed
 // BriefingActionStart boundary [08 R-CAMP-01 §§1–2, 6–8].
-func (g *gameShell) applyRetailContinuation(c *session.RetailCampaignContinuation) error {
+func (g *gameShell) applyRetailContinuation(c *session.RetailCampaignContinuation, sources *session.CommunitySources) error {
 	if g == nil || c == nil || g.cs == nil || g.cs.fs == nil {
 		return fmt.Errorf("nanolathe: retail continuation has no campaign state")
 	}
@@ -157,7 +166,7 @@ func (g *gameShell) applyRetailContinuation(c *session.RetailCampaignContinuatio
 	if g.frontend != nil {
 		g.openMenu(modeMenuMission)
 	}
-	g.openCampaignBriefing()
+	g.openCampaignBriefingWithSources(sources)
 	if clPtr != nil {
 		g.bindFrontendClient(clPtr)
 	}

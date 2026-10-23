@@ -49,9 +49,9 @@ func TestCheckpointRulesOwnerTags(t *testing.T) {
 	c := combatCheckpointContext(t)
 	s := NewServiceWithProjectileCapacity(1)
 	baseline := combatCheckpointBytes(t, s, c)
-	// Community (143), twelve scalar/binding bytes, record count (u32),
+	// Community (144), twelve scalar/binding bytes, record count (u32),
 	// then one 180-byte projectile.
-	const ruleOffset = 339
+	const ruleOffset = 340
 	if baseline[ruleOffset] != 0 {
 		t.Fatal("nil rules lost their zero tag")
 	}

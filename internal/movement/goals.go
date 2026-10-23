@@ -258,6 +258,9 @@ func (s *System) InstallAirGoal(req orders.AirGoalRequest) bool {
 	if handleRow(s.Flights, req.Owner) == nil {
 		return false
 	}
+	if req.Target == 0 && req.Node.Phase == 1 && orders.DescriptorFor(req.Node.ID).Name == "VTOL_RepairPatrol" && s.rules().AirPatrolRecovery(s) {
+		req.X, req.Z = s.recoverAirPatrolGoal(u, req.X, req.Z)
+	}
 	var marker *airMarker
 	if req.Target != 0 {
 		marker = s.newFollowUnitMarker(u, req.Target)
