@@ -69,7 +69,7 @@ func (g *gameShell) saveSidecar() save.Sidecar {
 	if g.battle != nil {
 		out.SurvivalBest = g.battle.recordSurvivalBest()
 	}
-	out.UnitLimit = g.setup.UnitLimit
+	out.UnitLimit = g.configuredUnitLimit()
 	if g.cs != nil {
 		out.ContentProfile = g.cs.profile
 		switch {

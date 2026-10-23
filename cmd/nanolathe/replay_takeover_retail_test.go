@@ -15,8 +15,10 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/session"
 )
 
-// Exercise the actual window lifecycle, HUD replacement, local selection,
-// live clock and orders, including a threaded Modern computer in Strict.
+// Exercise the actual window lifecycle, HUD replacement, the carried-over
+// selection and camera, live clock and orders, the Modern AI taking the
+// recording's other human, and a save and load of the continuation,
+// including a threaded Modern computer in Strict.
 // Optional captures use the normal software composer, with no window server.
 func TestReplayTakeoverWindowRetail(t *testing.T) {
 	for _, name := range []string{"modern", "strict-3.1", "community-3.9", "survival"} {
@@ -53,6 +55,17 @@ func TestReplayTakeoverWindowRetail(t *testing.T) {
 					p.SetPaused(true)
 					w.step(1)
 					at := p.Tick()
+					// Watching the recorded seat, select its commander and move
+					// the camera; both must survive taking that seat over.
+					var watched pool.Handle
+					if owner == b.sess.LocalOwner {
+						watched = localCommanderOf(t, b.sess).Handle
+						if _, err := b.submitHumanCommand(session.HumanCommand{Kind: session.HumanSelectionReplace, Selection: session.HumanSelectionCommand{Handles: []pool.Handle{watched}}}); err != nil {
+							t.Fatal(err)
+						}
+					}
+					b.cam.JumpTo(b.cam.X+64, b.cam.Z+32)
+					camX, camZ := b.cam.X, b.cam.Z
 					capture := func(shot string) {
 						t.Helper()
 						if dest := os.Getenv("NANOLATHE_TAKEOVER_SHOTS"); dest != "" && name == "modern" && owner == 1 {
@@ -77,10 +90,22 @@ func TestReplayTakeoverWindowRetail(t *testing.T) {
 					if b.playback != nil || b.takeover == nil || b.sess.LocalOwner != owner || b.hud.owner != owner || b.sess.Clock.GlobalTick != at || b.sess.Clock.Paused || b.sess.Clock.Active != 10 {
 						t.Fatalf("takeover did not transfer at tick %d: playback %v, takeover %v, owner %d, HUD %d, clock %+v; notice %s", at, b.playback != nil, b.takeover != nil, b.sess.LocalOwner, b.hud.owner, b.sess.Clock, p.overlay.notice)
 					}
+					if got := b.selectedHandlesInSlotOrder(); watched != 0 && (len(got) != 1 || got[0] != watched) || watched == 0 && len(got) != 0 {
+						t.Fatalf("the watched selection did not carry over: %v, want %v", got, watched)
+					}
+					if b.cam.X != camX || b.cam.Z != camZ {
+						t.Fatalf("the camera moved from (%d,%d) to (%d,%d)", camX, camZ, b.cam.X, b.cam.Z)
+					}
+					// The recording's other human is the Modern AI's now.
+					for seat := uint8(0); seat < 2; seat++ {
+						if seat != owner && !b.sess.ModernAIPlayer(seat) {
+							t.Fatalf("player %d is not a Modern AI computer player", seat+1)
+						}
+					}
 					w.shell.opts.SaveDir = t.TempDir()
 					_, canRestart := b.battleRestartRequest()
-					if w.shell.autosaveAllowed() || canRestart || !b.saveRestartUnavailable() || b.replay != nil || b.survivalBest != nil {
-						t.Fatal("the prototype enabled persistence or scoring")
+					if !w.shell.autosaveAllowed() || canRestart || b.replay != nil || b.survivalBest != nil {
+						t.Fatal("a single-player continuation must save, and must neither restart, record nor score")
 					}
 					u := localCommanderOf(t, b.sess)
 					x, z := u.X, u.Z
@@ -112,6 +137,25 @@ func TestReplayTakeoverWindowRetail(t *testing.T) {
 						t.Fatal("takeover changed the scenario")
 					}
 					capture("after")
+					// The continuation saves and loads as an ordinary battle,
+					// still played by the chosen seat.
+					live := b.sess.Units.LiveCountForPlayer(int(owner))
+					if err := w.shell.writeSlotSave(quicksaveName); err != nil {
+						t.Fatal(err)
+					}
+					if err := w.shell.loadRetailSavePath(session.RetailSavePath(w.shell.slotSaveDir(), quicksaveName)); err != nil {
+						t.Fatal(err)
+					}
+					loaded := w.shell.battle
+					if loaded == nil || loaded == b || loaded.takeover != nil || loaded.sess.LocalOwner != owner ||
+						loaded.sess.Units.LiveCountForPlayer(int(owner)) != live || loaded.sess.IsSurvival() != (name == "survival") {
+						t.Fatal("the continuation's save did not load as the chosen player's battle")
+					}
+					for seat := uint8(0); seat < 2; seat++ {
+						if seat != owner && !loaded.sess.ModernAIPlayer(seat) {
+							t.Fatalf("the loaded game lost player %d's Modern AI", seat+1)
+						}
+					}
 				})
 			}
 		})

@@ -12,9 +12,11 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/visibility"
 )
 
-// A replay fork changes control, never reconstructs the world. These are
-// prototype session policies, including in Strict (DESIGN_MULTIPLAYER §10.1).
-func TestReplayTakeoverPreservesWorldAndRetiresOnlyChosenController(t *testing.T) {
+// A replay fork changes control, never reconstructs the world: the chosen
+// seat becomes the local human and the recording's other human is played by
+// the Modern AI on its existing manager, in every mode (DESIGN_MULTIPLAYER
+// §10.1).
+func TestReplayTakeoverPreservesWorldAndHandsIdleHumansToModernAI(t *testing.T) {
 	fs := replayFixtureFS(t)
 	for _, mode := range []gameplay.Mode{gameplay.Strict31, gameplay.Modern, gameplay.Community39} {
 		t.Run(string(mode), func(t *testing.T) {
@@ -29,8 +31,8 @@ func TestReplayTakeoverPreservesWorldAndRetiresOnlyChosenController(t *testing.T
 			if err := s.setAIController(chosen, ai.ControllerModern); err != nil {
 				t.Fatal(err)
 			}
-			closed, retained := &closeCountingExt{}, &closeCountingExt{}
-			chosen.Ext, other.Ext = closed, retained
+			closed := &closeCountingExt{}
+			chosen.Ext = closed
 			beforeUnits := make(map[pool.Handle]units.Unit)
 			for _, u := range s.Units.Iter() {
 				beforeUnits[u.Handle] = *u
@@ -70,8 +72,14 @@ func TestReplayTakeoverPreservesWorldAndRetiresOnlyChosenController(t *testing.T
 					t.Fatalf("unit %d lost script, order, build, movement or cloak state", u.Handle)
 				}
 			}
-			if closed.closed != 1 || retained.closed != 0 || s.AI[1] != chosen || s.AI[0] != other || chosen.Ext != nil || other.Ext != retained || chosen.Planner != s.Rules.Planner || s.ModernAIPlayer(1) {
-				t.Fatal("takeover replaced a manager or stopped the wrong controller")
+			if closed.closed != 1 || s.AI[1] != chosen || s.AI[0] != other || chosen.Ext != nil || chosen.Planner != s.Rules.Planner || s.ModernAIPlayer(1) {
+				t.Fatal("takeover replaced a manager or did not stop the chosen controller")
+			}
+			// The old human is now a Modern AI computer player, paid in full,
+			// and the new human takes a human's plain credits.
+			if other.Controller != ai.ControllerModern || !s.ModernAIPlayer(0) || s.Econ.Players[0].ControllerState != 2 ||
+				!s.Econ.Players[0].FullIncome || s.Econ.Players[1].FullIncome {
+				t.Fatal("the recording's other human was not handed to the Modern AI")
 			}
 			if s.LocalOwner != 1 || s.ViewingOwner != 1 || s.Econ.Players[1].ControllerState != 1 || s.seatCommands.replay.perspective != (PresentationPerspective{}) {
 				t.Fatal("the chosen player did not acquire ordinary local control")
@@ -165,6 +173,14 @@ func TestOnlineReplayTakeoverPromotesComputerAndAcceptsLocalCommands(t *testing.
 	if closed.closed != 1 || retained.closed != 0 || s.AI[3] != chosen || s.AI[2] != other {
 		t.Fatal("the wrong controller was retired")
 	}
+	// Both recorded humans keep their seat rows, so their machines' sensor
+	// passes and hosted computers carry on, but the Modern AI plays them.
+	for _, human := range []uint8{0, 1} {
+		if !s.ModernAIPlayer(human) || s.Econ.Players[human].ControllerState != 2 || s.seatCommands.online.roles[human] != MatchRoleComputer ||
+			!s.onlineResults.seats[human].present || !s.Econ.Players[human].FullIncome {
+			t.Fatalf("recorded human %d was not handed to the Modern AI", human+1)
+		}
+	}
 	actor := replayUnits(s, 3)[0]
 	c, err := s.CaptureOnlineCommand(HumanCommand{Kind: HumanStop, Stop: HumanStopCommand{Handles: []pool.Handle{actor}}})
 	if err != nil {
@@ -186,7 +202,8 @@ func TestOnlineReplayTakeoverPromotesComputerAndAcceptsLocalCommands(t *testing.
 			t.Fatal(err)
 		}
 	}
-	if result := s.GetResult(); !result.Ended || result.Kind != "defeat" || s.OnlineBattleEnded() {
-		t.Fatalf("the promoted player's defeat did not have its own result: %+v", result)
+	// No human plays on, so the local defeat ends the continuation.
+	if result := s.GetResult(); !result.Ended || result.Kind != "defeat" || !s.OnlineBattleEnded() {
+		t.Fatalf("the promoted player's defeat did not end the continuation: %+v", result)
 	}
 }

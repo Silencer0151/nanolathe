@@ -48,7 +48,34 @@ func (s *Session) ReplayTakeoverEligible(owner uint8) error {
 	if s.seatCommands.lastPosition == ^uint64(0) || s.nextHumanSequence == ^uint64(0) || s.Clock.GlobalTick == ^uint32(0) {
 		return refuse("remaining tick and command sequence numbers")
 	}
+	if len(s.replayTakeoverIdleHumans(owner)) != 0 && s.modernAI == nil && !modernAIRegistered() {
+		return refuse("a build with the Modern AI computer player, which plays the recording's other humans")
+	}
 	return nil
+}
+
+// replayTakeoverIdleHumans lists, in ascending slot order, the recorded humans
+// other than owner who are still playing: after a takeover nobody would give
+// them orders, so the Modern AI plays them (DESIGN_MULTIPLAYER §10.1). A
+// human already defeated, ending, watching, removed or without a manager is
+// left as it is.
+func (s *Session) replayTakeoverIdleHumans(owner uint8) []uint8 {
+	var out []uint8
+	for i := range s.Econ.Players {
+		player := uint8(i)
+		p := &s.Econ.Players[i]
+		if player == owner || !p.Exists || p.ControllerState != 1 || p.IsObserver || p.Watcher || p.GameEnded || p.Side == 10 {
+			continue
+		}
+		if i >= len(s.AI) || s.AI[i] == nil || s.AI[i].Passive || s.seatCommands.removed[player] || s.Units.LiveCountForPlayer(i) == 0 {
+			continue
+		}
+		if s.onlineResults != nil && s.onlineSeatEnded(i) {
+			continue
+		}
+		out = append(out, player)
+	}
+	return out
 }
 
 // TakeOverReplay retains the live world and transfers control to owner. The
@@ -58,6 +85,14 @@ func (s *Session) ReplayTakeoverEligible(owner uint8) error {
 func (s *Session) TakeOverReplay(owner uint8) (uint64, error) {
 	if err := s.ReplayTakeoverEligible(owner); err != nil {
 		return 0, err
+	}
+	idle := s.replayTakeoverIdleHumans(owner)
+	if len(idle) != 0 {
+		// Binding the step changes no game; it makes the controller choices
+		// below infallible, so every failure still precedes mutation.
+		if err := s.resolveModernAI(idle[0]); err != nil {
+			return 0, err
+		}
 	}
 	// A fork no longer has the recorded configuration identity. Retain the
 	// composition bindings, but retire its diagnostic checkpoint history.
@@ -84,8 +119,6 @@ func (s *Session) TakeOverReplay(owner uint8) (uint64, error) {
 		m.Controller, m.Planner = ai.ControllerClassic, s.Rules.Planner
 	}
 	s.Econ.Players[owner].ControllerState = 1
-	s.Econ.Players[owner].FullIncome = false // human credits are already full
-	s.Econ.ClearPlayerSelector(owner)
 	if s.onlineResults != nil {
 		s.seatCommands.online.roles[owner] = MatchRoleHuman
 		if !s.onlineResults.seats[owner].present {
@@ -102,6 +135,22 @@ func (s *Session) TakeOverReplay(owner uint8) (uint64, error) {
 		s.VictoryDone, s.DefeatDone = false, false
 		s.publishEndCountdown()
 	}
+	// Every other recorded human who is still playing becomes a Modern AI
+	// computer player on its existing manager, with no new units, resources
+	// or random draws. Online it keeps its seat row, so its machine's
+	// countdown, sensor pass and hosted computers carry on as before.
+	for _, player := range idle {
+		s.Econ.Players[player].ControllerState = 2
+		if s.onlineResults != nil {
+			s.seatCommands.online.roles[player] = MatchRoleComputer
+		}
+		_ = s.setAIController(s.AI[player], ai.ControllerModern) // the step is bound above
+	}
+	// The selected player is credited as a human: no Modern full-income mark
+	// and no computer seat's own discount word, which the lobby row would
+	// otherwise project again (projectComputerIncome).
+	s.projectFullIncomePlayers()
+	s.Econ.ClearPlayerSelector(owner)
 	changedView := owner != s.ViewingOwner
 	s.LocalOwner, s.ViewingOwner = owner, owner
 	if s.Vis != nil {
@@ -121,4 +170,12 @@ func (s *Session) TakeOverReplay(owner uint8) (uint64, error) {
 	_ = s.SetPresentationPerspective(PresentationPerspective{})
 	s.RepublishPresentation()
 	return position, nil
+}
+
+// modernAIRegistered reports whether this build links the Modern AI think
+// step (RegisterModernAI), without binding it to a session.
+func modernAIRegistered() bool {
+	modernAIMu.Lock()
+	defer modernAIMu.Unlock()
+	return modernAIStep != nil
 }

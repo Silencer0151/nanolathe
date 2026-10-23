@@ -517,11 +517,14 @@ func (h *retailBattleHUD) drawReplayOverlay(c *client.Client, b *battleSession) 
 	}
 }
 
+// drawReplayTakeover marks a continued online replay that stopped, where the
+// overlay stood. A running continuation draws nothing: it plays as an
+// ordinary battle (DESIGN_MULTIPLAYER §10.1).
 func (h *retailBattleHUD) drawReplayTakeover(c *client.Client, b *battleSession) {
-	line := "Replay takeover: " + b.takeover.label
-	if b.takeover.err != nil {
-		line = "Replay continuation stopped"
+	if b.takeover.err == nil {
+		return
 	}
+	line := "Replay continuation stopped"
 	left, top, _ := b.cam.ChromeInset()
 	x := int(left) + 3
 	y := max(int(top)+4, c.MessageColumnBottom()+2, replayWeatherBottom(b, h.console.Height)+2)

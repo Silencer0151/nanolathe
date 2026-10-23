@@ -511,8 +511,24 @@ func TestReplayOnlineSeatsRecordTheSameStreamRetail(t *testing.T) {
 	for range 30 {
 		fork.step(1)
 	}
-	if fb.takeover.err != nil || fb.sess.Clock.GlobalTick != at+30 || fb.sess.LocalOwner != 1 || fp.Tick() != at {
+	if fb.takeover.err != nil || fb.sess.Clock.GlobalTick != at+30 || fb.sess.LocalOwner != 1 || fp.Tick() != at || !fb.sess.ModernAIPlayer(0) {
 		t.Fatalf("online local continuation stalled: tick %d, error %v", fb.sess.Clock.GlobalTick, fb.takeover.err)
+	}
+	// It runs on this machine alone, so it pauses, but it does not save.
+	fb.applyBattleSchedule(ui.BattleScheduleIntent{PauseSet: true, Pause: true})
+	held := fb.sess.Clock.GlobalTick
+	for range 10 {
+		fork.step(1)
+	}
+	if fb.sess.Clock.GlobalTick != held || !fb.battleState().Paused() || fb.takeoverRefusal("SAVEGAME") == "" || fb.takeoverRefusal("LOADGAME") != "" {
+		t.Fatal("the online continuation did not pause, or offered a save")
+	}
+	fb.applyBattleSchedule(ui.BattleScheduleIntent{PauseSet: true, Pause: false})
+	for range 10 {
+		fork.step(1)
+	}
+	if fb.sess.Clock.GlobalTick != held+10 {
+		t.Fatalf("the online continuation did not resume: tick %d after %d", fb.sess.Clock.GlobalTick, held)
 	}
 }
 
