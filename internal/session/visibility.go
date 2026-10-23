@@ -300,10 +300,19 @@ func (s *Session) initializeSensorStatus(u *units.Unit) {
 	if s == nil || u == nil {
 		return
 	}
-	u.Flags &^= visibility.FriendlyMask | visibility.JammedBit
-	if s.onlineResults == nil && u.Owner == s.ViewingOwner {
-		u.Flags |= visibility.SonarBit
+	u.Flags = seededSensorStatus(u.Flags, u.Owner, s.ViewingOwner, s.onlineResults == nil)
+}
+
+// seededSensorStatus is a status word with the constructor's contact bits for
+// viewer: no friendly pair and no jam marker, and the sonar exemption on the
+// viewer's own unit when sonar is set — a single-player battle's single bank
+// [03 R-VIS-01 §4 Gate]. An online battle's banks seed their own.
+func seededSensorStatus(flags uint32, owner, viewer uint8, sonar bool) uint32 {
+	flags &^= visibility.FriendlyMask | visibility.JammedBit
+	if sonar && owner == viewer {
+		flags |= visibility.SonarBit
 	}
+	return flags
 }
 
 // stepSensorPhase runs the sensor status and cloak deadline walks inside the
@@ -318,16 +327,45 @@ func (s *Session) stepSensorPhaseFor(tick uint32, viewer int) {
 	if s.Vis == nil || s.Units == nil {
 		return
 	}
+	// A playback drawing another viewer re-derives that viewer's contacts at
+	// this pass's cadence (replay_view.go); the count is all it reads here.
+	s.unitChannel.perspective.realPasses++
 	// SensorTick owns the active-player gate and drops its prior callback
 	// snapshot when that gate skips [R-VIS-01 §4] — so this pass calls it
 	// unconditionally.
 	active := s.activePlayerCount()
+	sensorUnits := s.appendSensorUnits(s.sensorUnitScratch[:0], &s.sensorSlicedScratch, &s.primaryMaskScratch)
+	// Pass 1's allied disjunct fires only for an owner whose ShareRadar bit is
+	// set, which only an online seat command sets [R-VIS-01 §7]; the online
+	// pass below hands it the sharing owners. Pass 4 — the one pass that used
+	// to consult a row, to separate hostiles from friends in a live-unit scan —
+	// now reads the per-side primary candidate lists, where hostility was
+	// settled once at the registry rebuild against the alliance rows economy
+	// owns [06 §3.1] (WU-19-210).
+	defeated := s.sensorViewerDefeated(viewer)
+	if s.onlineResults != nil {
+		// Pass 1's allied disjunct: the units of every owner that shares radar
+		// and has declared alliance toward this viewer are marked friendly
+		// [03 R-VIS-01 §4] [03 R-VIS-01 §7]; the owner's declaration is the
+		// one matrix's (§6.7 Q22). A hosted computer reads this pass.
+		s.Vis.SensorTickForPerspectiveSharing(visibility.PlayerID(viewer), defeated, tick, active, sensorUnits, s.Econ.RadarShareOwners(viewer))
+	} else {
+		s.Vis.SetViewerDefeated(defeated)
+		s.Vis.SensorTick(tick, active, sensorUnits)
+	}
+	s.sensorUnitScratch = sensorUnits[:0]
+}
+
+// appendSensorUnits appends one sensor pass's inputs to dst: every live unit,
+// players then slots ascending (I1), pointing at the unit's own runtime status
+// word and reveal deadline. sliced and masks are the walk's and the
+// primary-list membership's reused storage. It reads committed state only.
+func (s *Session) appendSensorUnits(dst []visibility.SensorUnit, sliced *[]*units.Unit, masks *[]uint16) []visibility.SensorUnit {
 	// Sensor callbacks write the unit's runtime status word directly. The
 	// same word survives skipped passes, supplies save projection, and is
 	// replaced by allocation when a pool slot is reused [03 R-VIS-01 §4]
 	// [08 R-SAVE-02 §6]. The staged slice contains only this pass's inputs.
 	records := s.Units.TotalRecords()
-	sensorUnits := s.sensorUnitScratch[:0]
 	// Pass 4's candidate set: the per-side PRIMARY candidate lists of [06 §3.1],
 	// folded into one membership bit per player slot so the sensor pass can read
 	// "is this unit on my owner's list" without a second lookup structure. The
@@ -335,9 +373,9 @@ func (s *Session) stepSensorPhaseFor(tick uint32, viewer int) {
 	// it, this is a read of what the last rebuild left [03 R-VIS-01 §4] pass 4.
 	// A slot with no registry contributes no bits, so its units never breach,
 	// which is the fail-closed direction (WU-19-210).
-	primaryOf := s.primaryCandidateMasks()
-	s.sensorSlicedScratch = s.Units.AppendLiveSliced(s.sensorSlicedScratch[:0]) // players then slots ascending (I1)
-	for _, u := range s.sensorSlicedScratch {
+	primaryOf := s.primaryCandidateMasks(masks)
+	*sliced = s.Units.AppendLiveSliced((*sliced)[:0]) // players then slots ascending (I1)
+	for _, u := range *sliced {
 		if u == nil || !u.Alive {
 			continue
 		}
@@ -391,7 +429,7 @@ func (s *Session) stepSensorPhaseFor(tick uint32, viewer int) {
 		if h >= 0 && h < len(primaryOf) {
 			mask = primaryOf[h]
 		}
-		sensorUnits = append(sensorUnits, visibility.SensorUnit{
+		dst = append(dst, visibility.SensorUnit{
 			ID:                    uint16(u.Handle),
 			AllocationSerial:      u.AllocationSerial,
 			Owner:                 visibility.PlayerID(u.Owner),
@@ -417,39 +455,26 @@ func (s *Session) stepSensorPhaseFor(tick uint32, viewer int) {
 			PrimaryCandidateOf:    mask,
 		})
 	}
-	// Pass 1's allied disjunct fires only for an owner whose ShareRadar bit is
-	// set, which only an online seat command sets [R-VIS-01 §7]; the online
-	// pass below hands it the sharing owners. Pass 4 — the one pass that used
-	// to consult a row, to separate hostiles from friends in a live-unit scan —
-	// now reads the per-side primary candidate lists, where hostility was
-	// settled once at the registry rebuild against the alliance rows economy
-	// owns [06 §3.1] (WU-19-210).
-	//
-	// Defeated/observing friendliness is relative to the viewing player,
-	// independently of the true-local command owner [03 R-VIS-01 §4].
-	defeated := false
-	if s.Econ != nil && viewer >= 0 && viewer < len(s.Econ.Players) {
-		p := &s.Econ.Players[viewer]
-		// Defeat is derived from the viewer's two unit counters, not from a
-		// flag: the defeat predicate for session kinds 2 and 3 is the local
-		// live unit count reaching zero [08 R-SKIR-01 §3] "Defeat detection",
-		// which is this predicate once the row has created a unit.
-		// A watching viewer — online, a host that took the watch branch
-		// (enterOnlineWatch) — marks every unit friendly as a defeated one
-		// does [03 R-VIS-01 §4] pass 1; single-player never sets the bit.
-		defeated = p.IsObserver || p.Watcher || s.ownerEliminated(viewer)
+	return dst
+}
+
+// sensorViewerDefeated is pass 1's third disjunct for viewer: a defeated or
+// watching viewer marks every unit friendly [03 R-VIS-01 §4] pass 1.
+// Defeated/observing friendliness is relative to the viewing player,
+// independently of the true-local command owner [03 R-VIS-01 §4].
+func (s *Session) sensorViewerDefeated(viewer int) bool {
+	if s.Econ == nil || viewer < 0 || viewer >= len(s.Econ.Players) {
+		return false
 	}
-	if s.onlineResults != nil {
-		// Pass 1's allied disjunct: the units of every owner that shares radar
-		// and has declared alliance toward this viewer are marked friendly
-		// [03 R-VIS-01 §4] [03 R-VIS-01 §7]; the owner's declaration is the
-		// one matrix's (§6.7 Q22). A hosted computer reads this pass.
-		s.Vis.SensorTickForPerspectiveSharing(visibility.PlayerID(viewer), defeated, tick, active, sensorUnits, s.Econ.RadarShareOwners(viewer))
-	} else {
-		s.Vis.SetViewerDefeated(defeated)
-		s.Vis.SensorTick(tick, active, sensorUnits)
-	}
-	s.sensorUnitScratch = sensorUnits[:0]
+	p := &s.Econ.Players[viewer]
+	// Defeat is derived from the viewer's two unit counters, not from a
+	// flag: the defeat predicate for session kinds 2 and 3 is the local
+	// live unit count reaching zero [08 R-SKIR-01 §3] "Defeat detection",
+	// which is this predicate once the row has created a unit.
+	// A watching viewer — online, a host that took the watch branch
+	// (enterOnlineWatch) — marks every unit friendly as a defeated one
+	// does [03 R-VIS-01 §4] pass 1; single-player never sets the bit.
+	return p.IsObserver || p.Watcher || s.ownerEliminated(viewer)
 }
 
 // primaryCandidateMasks folds the per-side PRIMARY candidate lists of [06 §3.1]
@@ -466,9 +491,9 @@ func (s *Session) stepSensorPhaseFor(tick uint32, viewer int) {
 // The row is indexed by handle over the pool's fixed record count, never a map
 // (I1). With no combat service there are no lists and no unit ever breaches.
 //
-// The row is a reused buffer cleared on entry, not state: the sensor pass reads
-// it within the tick that builds it and never across ticks.
-func (s *Session) primaryCandidateMasks() []uint16 {
+// The row is the caller's reused buffer, cleared on entry, not state: the
+// sensor pass reads it within the call that builds it and never across ticks.
+func (s *Session) primaryCandidateMasks(scratch *[]uint16) []uint16 {
 	if s == nil || s.Combat == nil || s.Units == nil {
 		return nil
 	}
@@ -476,10 +501,10 @@ func (s *Session) primaryCandidateMasks() []uint16 {
 	if n <= 0 {
 		return nil
 	}
-	if cap(s.primaryMaskScratch) < n {
-		s.primaryMaskScratch = make([]uint16, n)
+	if cap(*scratch) < n {
+		*scratch = make([]uint16, n)
 	}
-	masks := s.primaryMaskScratch[:n]
+	masks := (*scratch)[:n]
 	for i := range masks {
 		masks[i] = 0
 	}

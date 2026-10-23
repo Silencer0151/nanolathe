@@ -204,22 +204,15 @@ func (s *Service) RebuildFogWindow(cameraX, cameraZ, viewW, viewH int32) {
 	if s == nil || viewW <= 0 || viewH <= 0 || s.W <= 0 || s.H <= 0 {
 		return
 	}
-	// Window cells cover the camera viewport and one border cell on each side.
-	startX := numeric.FloorDiv(cameraX-16, 32) - 1
-	startZ := numeric.FloorDiv(cameraZ-16, 32) - 1
-	endX := numeric.FloorDiv(cameraX+viewW-16+31, 32) + 1
-	endZ := numeric.FloorDiv(cameraZ+viewH-16+31, 32) + 1
-	w, h := endX-startX, endZ-startZ
-	if w <= 0 || h <= 0 {
+	key, ok := s.fogWindow(cameraX, cameraZ, viewW, viewH)
+	if !ok {
 		return
 	}
-	if s.mode.FogCacheValid() && s.fog.originX == startX && s.fog.originZ == startZ && s.fog.w == w && s.fog.h == h {
+	w, h := key.endX-key.startX, key.endZ-key.startZ
+	if s.mode.FogCacheValid() && s.fog.originX == key.startX && s.fog.originZ == key.startZ && s.fog.w == w && s.fog.h == h {
 		return
 	}
-	n := int(w * h)
-	key := fogWindowKey{startX: startX, startZ: startZ, endX: endX, endZ: endZ, mapW: s.W, mapH: s.H}
-	if s.fog.inValid && s.fog.inKey == key && s.fog.w == w && s.fog.h == h && len(s.fog.ch0) == n &&
-		s.fog.originX == startX && s.fog.originZ == startZ && len(s.fog.in) == int(s.W*s.H) {
+	if s.fog.derivedFor(key) {
 		// With a complete set of marks only the marked cells can differ from
 		// the recorded input; otherwise every cell is compared. Both visit the
 		// changed cells in the same row-major order, so both derive the same
@@ -228,7 +221,7 @@ func (s *Service) RebuildFogWindow(cameraX, cameraZ, viewW, viewH int32) {
 		if s.fogTracked && s.fog.inLocal == s.local && s.fog.inCurrent == s.mode.CurrentEnabled() {
 			changed = s.updateMarkedFogCells(key)
 		} else {
-			changed = s.updateFogCells(key)
+			changed = s.fog.updateCells(key, s.fogSource())
 		}
 		s.trackFogInputs()
 		s.mode |= ModeFogCacheValid
@@ -239,14 +232,53 @@ func (s *Service) RebuildFogWindow(cameraX, cameraZ, viewW, viewH int32) {
 		}
 		return
 	}
-	if s.fog.w != w || s.fog.h != h || len(s.fog.ch0) != n {
-		s.fog.w, s.fog.h = w, h
-		s.fog.ch0 = make([]uint8, n)
-		s.fog.ch1 = make([]uint8, n)
+	s.fog.derive(key, s.fogSource())
+	s.trackFogInputs()
+	s.mode |= ModeFogCacheValid
+	// The revision moves only after the derived bytes and their address window
+	// are complete, so publication can retain a previous immutable copy.
+	s.fogVersion++
+}
+
+// fogWindow is the cache window of a camera viewport: its cells cover the
+// viewport and one border cell on each side, and the key records the map
+// the derivation is clipped against [03 §3.3].
+func (s *Service) fogWindow(cameraX, cameraZ, viewW, viewH int32) (fogWindowKey, bool) {
+	startX := numeric.FloorDiv(cameraX-16, 32) - 1
+	startZ := numeric.FloorDiv(cameraZ-16, 32) - 1
+	endX := numeric.FloorDiv(cameraX+viewW-16+31, 32) + 1
+	endZ := numeric.FloorDiv(cameraZ+viewH-16+31, 32) + 1
+	if endX-startX <= 0 || endZ-startZ <= 0 {
+		return fogWindowKey{}, false
 	}
-	s.fog.originX, s.fog.originZ = startX, startZ
-	for i := range s.fog.ch0 {
-		s.fog.ch0[i], s.fog.ch1[i] = 0, 0
+	return fogWindowKey{startX: startX, startZ: startZ, endX: endX, endZ: endZ, mapW: s.W, mapH: s.H}, true
+}
+
+// derivedFor reports whether f holds a complete derivation for key, whose
+// recorded input a comparing update can bring up to date.
+func (f *FogCache) derivedFor(key fogWindowKey) bool {
+	w, h := key.endX-key.startX, key.endZ-key.startZ
+	return f.inValid && f.inKey == key && f.w == w && f.h == h && len(f.ch0) == int(w*h) &&
+		f.originX == key.startX && f.originZ == key.startZ && len(f.in) == int(key.mapW*key.mapH)
+}
+
+// derive fills f for key from src in full — the four corner seeds of every
+// map cell, then the map-edge fixups — and records the input it read, so a
+// later update need re-derive only the cells whose input changed. Both the
+// service's own cache and a caller's (DeriveFogFor) are derived here.
+func (f *FogCache) derive(key fogWindowKey, src fogSource) {
+	startX, startZ, endX, endZ := key.startX, key.startZ, key.endX, key.endZ
+	mapW, mapH := key.mapW, key.mapH
+	w, h := endX-startX, endZ-startZ
+	n := int(w * h)
+	if f.w != w || f.h != h || len(f.ch0) != n {
+		f.w, f.h = w, h
+		f.ch0 = make([]uint8, n)
+		f.ch1 = make([]uint8, n)
+	}
+	f.originX, f.originZ = startX, startZ
+	for i := range f.ch0 {
+		f.ch0[i], f.ch1[i] = 0, 0
 	}
 	put := func(dst []uint8, gx, gz int32, bit uint8) {
 		if gx < startX || gx >= endX || gz < startZ || gz >= endZ {
@@ -260,22 +292,21 @@ func (s *Service) RebuildFogWindow(cameraX, cameraZ, viewW, viewH int32) {
 		put(dst, gx, gz-1, 4)
 		put(dst, gx-1, gz-1, 8)
 	}
-	cells := int(s.W * s.H)
-	if cap(s.fog.in) < cells {
-		s.fog.in = make([]uint8, cells)
+	cells := int(mapW * mapH)
+	if cap(f.in) < cells {
+		f.in = make([]uint8, cells)
 	}
-	s.fog.in = s.fog.in[:cells]
-	src := s.fogSource()
-	for gz := int32(0); gz < s.H; gz++ {
-		for gx := int32(0); gx < s.W; gx++ {
-			i := int(gz*s.W + gx)
+	f.in = f.in[:cells]
+	for gz := int32(0); gz < mapH; gz++ {
+		for gx := int32(0); gx < mapW; gx++ {
+			i := int(gz*mapW + gx)
 			v := src.at(i)
-			s.fog.in[i] = v
+			f.in[i] = v
 			if v&fogUnseen != 0 {
-				seed(s.fog.ch1, gx, gz)
+				seed(f.ch1, gx, gz)
 			}
 			if v&fogUnexplored != 0 {
-				seed(s.fog.ch0, gx, gz)
+				seed(f.ch0, gx, gz)
 			}
 		}
 	}
@@ -310,34 +341,29 @@ func (s *Service) RebuildFogWindow(cameraX, cameraZ, viewW, viewH int32) {
 	}
 	if startZ < 0 { // window crosses the north edge [03 §3.3]
 		for gx := startX; gx < endX; gx++ {
-			fix(s.fog.ch1, gx, -1, 4, 1, 8, 2)
-			fix(s.fog.ch0, gx, -1, 4, 1, 8, 2)
+			fix(f.ch1, gx, -1, 4, 1, 8, 2)
+			fix(f.ch0, gx, -1, 4, 1, 8, 2)
 		}
 	}
-	if endZ > s.H { // window crosses the south edge [03 §3.3]
+	if endZ > mapH { // window crosses the south edge [03 §3.3]
 		for gx := startX; gx < endX; gx++ {
-			fix(s.fog.ch1, gx, s.H-1, 1, 4, 2, 8)
-			fix(s.fog.ch0, gx, s.H-1, 1, 4, 2, 8)
+			fix(f.ch1, gx, mapH-1, 1, 4, 2, 8)
+			fix(f.ch0, gx, mapH-1, 1, 4, 2, 8)
 		}
 	}
 	if startX < 0 { // window crosses the west edge [03 §3.3]
 		for gz := startZ; gz < endZ; gz++ {
-			fix(s.fog.ch1, -1, gz, 8, 4, 2, 1)
-			fix(s.fog.ch0, -1, gz, 8, 4, 2, 1)
+			fix(f.ch1, -1, gz, 8, 4, 2, 1)
+			fix(f.ch0, -1, gz, 8, 4, 2, 1)
 		}
 	}
-	if endX > s.W { // window crosses the east edge [03 §3.3]
+	if endX > mapW { // window crosses the east edge [03 §3.3]
 		for gz := startZ; gz < endZ; gz++ {
-			fix(s.fog.ch1, s.W-1, gz, 4, 8, 1, 2)
-			fix(s.fog.ch0, s.W-1, gz, 4, 8, 1, 2)
+			fix(f.ch1, mapW-1, gz, 4, 8, 1, 2)
+			fix(f.ch0, mapW-1, gz, 4, 8, 1, 2)
 		}
 	}
-	s.fog.inKey, s.fog.inValid = key, true
-	s.trackFogInputs()
-	s.mode |= ModeFogCacheValid
-	// The revision moves only after the derived bytes and their address window
-	// are complete, so publication can retain a previous immutable copy.
-	s.fogVersion++
+	f.inKey, f.inValid = key, true
 }
 
 // The two input bits of one visibility cell, as FogCache.in records them.
@@ -370,8 +396,8 @@ func (src fogSource) at(i int) uint8 {
 	return v
 }
 
-// updateFogCells brings a cache that was fully derived for this window up to
-// date with the live grids and reports whether any channel byte changed.
+// updateCells brings a cache that was fully derived for this window up to
+// date with src and reports whether any channel byte changed.
 //
 // Every channel byte is a function of the input of the (up to) four
 // visibility cells whose corners meet at it, plus the map-edge fixups, which
@@ -381,20 +407,19 @@ func (src fogSource) at(i int) uint8 {
 // bytes around each change at once; a byte with a second changed corner later
 // in the walk is derived again then, so every byte ends derived from final
 // inputs. The result is byte-identical to the full rebuild [03 §3.3].
-func (s *Service) updateFogCells(key fogWindowKey) bool {
-	src := s.fogSource()
-	in := s.fog.in
+func (f *FogCache) updateCells(key fogWindowKey, src fogSource) bool {
+	in := f.in
 	changed := false
-	for gz := int32(0); gz < s.H; gz++ {
-		row := int(gz * s.W)
-		for gx := int32(0); gx < s.W; gx++ {
+	for gz := int32(0); gz < key.mapH; gz++ {
+		row := int(gz * key.mapW)
+		for gx := int32(0); gx < key.mapW; gx++ {
 			v := src.at(row + int(gx))
 			if v == in[row+int(gx)] {
 				continue
 			}
 			in[row+int(gx)] = v
 			for _, d := range [4][2]int32{{0, 0}, {-1, 0}, {0, -1}, {-1, -1}} {
-				if s.deriveFogCell(key, gx+d[0], gz+d[1]) {
+				if f.deriveCell(key, gx+d[0], gz+d[1]) {
 					changed = true
 				}
 			}
@@ -403,7 +428,7 @@ func (s *Service) updateFogCells(key fogWindowKey) bool {
 	return changed
 }
 
-// updateMarkedFogCells is updateFogCells over the marked cells alone. Every
+// updateMarkedFogCells is updateCells over the marked cells alone. Every
 // cell whose input changed since the recorded input was brought up to date is
 // marked (Service.fogDirty), so the cells it skips are cells the full walk
 // would skip too; it visits the rest in ascending index — row-major — order,
@@ -428,7 +453,7 @@ func (s *Service) updateMarkedFogCells(key fogWindowKey) bool {
 			in[i] = v
 			gx, gz := int32(i%w), int32(i/w)
 			for _, d := range [4][2]int32{{0, 0}, {-1, 0}, {0, -1}, {-1, -1}} {
-				if s.deriveFogCell(key, gx+d[0], gz+d[1]) {
+				if s.fog.deriveCell(key, gx+d[0], gz+d[1]) {
 					changed = true
 				}
 			}
@@ -450,20 +475,21 @@ func (s *Service) trackFogInputs() {
 	s.fogTracked = true
 }
 
-// deriveFogCell recomputes the channel byte at map cell (ox, oz) from the
+// deriveCell recomputes the channel byte at map cell (ox, oz) from the
 // recorded inputs, exactly as the full rebuild derives it: the four corner
 // seeds, then the edge fixups in their order (top, bottom, left, right). It
 // reports whether the byte changed; a cell outside the window has none.
-func (s *Service) deriveFogCell(key fogWindowKey, ox, oz int32) bool {
+func (f *FogCache) deriveCell(key fogWindowKey, ox, oz int32) bool {
 	if ox < key.startX || ox >= key.endX || oz < key.startZ || oz >= key.endZ {
 		return false
 	}
+	mapW, mapH := key.mapW, key.mapH
 	var c0, c1 uint8
 	corner := func(ix, iz int32, bit uint8) {
-		if ix < 0 || iz < 0 || ix >= s.W || iz >= s.H {
+		if ix < 0 || iz < 0 || ix >= mapW || iz >= mapH {
 			return
 		}
-		v := s.fog.in[int(iz*s.W+ix)]
+		v := f.in[int(iz*mapW+ix)]
 		if v&fogUnseen != 0 {
 			c1 |= bit
 		}
@@ -490,20 +516,20 @@ func (s *Service) deriveFogCell(key fogWindowKey, ox, oz int32) bool {
 	if key.startZ < 0 && oz == -1 {
 		edge(4, 1, 8, 2)
 	}
-	if key.endZ > s.H && oz == s.H-1 {
+	if key.endZ > mapH && oz == mapH-1 {
 		edge(1, 4, 2, 8)
 	}
 	if key.startX < 0 && ox == -1 {
 		edge(8, 4, 2, 1)
 	}
-	if key.endX > s.W && ox == s.W-1 {
+	if key.endX > mapW && ox == mapW-1 {
 		edge(4, 8, 1, 2)
 	}
-	i := int((oz-key.startZ)*s.fog.w + ox - key.startX)
-	if s.fog.ch0[i] == c0 && s.fog.ch1[i] == c1 {
+	i := int((oz-key.startZ)*f.w + ox - key.startX)
+	if f.ch0[i] == c0 && f.ch1[i] == c1 {
 		return false
 	}
-	s.fog.ch0[i], s.fog.ch1[i] = c0, c1
+	f.ch0[i], f.ch1[i] = c0, c1
 	return true
 }
 
