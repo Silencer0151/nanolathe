@@ -53,13 +53,13 @@ func TestReplayTakeoverWindowRetail(t *testing.T) {
 					p.SetPaused(true)
 					w.step(1)
 					at := p.Tick()
-					capture := func(name string) {
+					capture := func(shot string) {
 						t.Helper()
 						if dest := os.Getenv("NANOLATHE_TAKEOVER_SHOTS"); dest != "" && name == "modern" && owner == 1 {
 							if err := os.MkdirAll(dest, 0o755); err != nil {
 								t.Fatal(err)
 							}
-							if err := encodeShotPNG(filepath.Join(dest, name+".png"), w.cl.ComposeFrame()); err != nil {
+							if err := encodeShotPNG(filepath.Join(dest, shot+".png"), w.cl.ComposeFrame()); err != nil {
 								t.Fatal(err)
 							}
 							data, err := os.ReadFile(path)
@@ -77,7 +77,9 @@ func TestReplayTakeoverWindowRetail(t *testing.T) {
 					if b.playback != nil || b.takeover == nil || b.sess.LocalOwner != owner || b.hud.owner != owner || b.sess.Clock.GlobalTick != at || b.sess.Clock.Paused || b.sess.Clock.Active != 10 {
 						t.Fatalf("takeover did not transfer at tick %d: playback %v, takeover %v, owner %d, HUD %d, clock %+v; notice %s", at, b.playback != nil, b.takeover != nil, b.sess.LocalOwner, b.hud.owner, b.sess.Clock, p.overlay.notice)
 					}
-					if w.shell.autosaveAllowed() || !b.saveRestartUnavailable() || b.replay != nil || b.survivalBest != nil {
+					w.shell.opts.SaveDir = t.TempDir()
+					_, canRestart := b.battleRestartRequest()
+					if w.shell.autosaveAllowed() || canRestart || !b.saveRestartUnavailable() || b.replay != nil || b.survivalBest != nil {
 						t.Fatal("the prototype enabled persistence or scoring")
 					}
 					u := localCommanderOf(t, b.sess)

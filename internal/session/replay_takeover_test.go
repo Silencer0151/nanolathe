@@ -87,6 +87,15 @@ func TestReplayTakeoverPreservesWorldAndRetiresOnlyChosenController(t *testing.T
 			if _, err := s.TakeOverReplay(0); err == nil {
 				t.Fatal("a second takeover was accepted")
 			}
+			// Losing the old human must now be the selected player's win,
+			// rather than an ending inherited from the recorded machine.
+			s.Units.Destroy(replayUnits(s, 0)[0], 1)
+			for i := 0; i < 300 && !s.GetResult().Ended; i++ {
+				s.ExecuteStep(s.PrepareStep(s.Clock.ScaledAnchor + 1))
+			}
+			if result := s.GetResult(); !result.Ended || result.Kind != "victory" || s.LocalOwner != 1 {
+				t.Fatalf("the selected player's victory did not end locally: %+v", result)
+			}
 		})
 	}
 }
@@ -170,5 +179,14 @@ func TestOnlineReplayTakeoverPromotesComputerAndAcceptsLocalCommands(t *testing.
 	rs := s.DrainCommandReceipts()
 	if len(rs) != 1 || rs[0].Outcome != CommandApplied || s.LocalOwner != 3 {
 		t.Fatalf("promoted computer's live command: %+v; local %d", rs, s.LocalOwner)
+	}
+	s.Units.Destroy(actor, 1)
+	for i := 0; i < 300 && !s.GetResult().Ended; i++ {
+		if err := s.StepGranted(s.Clock.GlobalTick + 1); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if result := s.GetResult(); !result.Ended || result.Kind != "defeat" || s.OnlineBattleEnded() {
+		t.Fatalf("the promoted player's defeat did not have its own result: %+v", result)
 	}
 }
