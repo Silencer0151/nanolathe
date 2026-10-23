@@ -267,6 +267,11 @@ func (s *Session) publishFrame(tick uint32, paused bool) {
 		// selection from those words once (hud.LocalInterface.AdoptStatusWords)
 		// and composes its own bit over them.
 		published.Selection.LocalPlayer = s.LocalOwner
+		if viewer != s.ViewingOwner && !reveal {
+			// A playback viewer selects the viewed seat's units, as the
+			// host's local state does (DESIGN_MULTIPLAYER §10).
+			published.Selection.LocalPlayer = viewer
+		}
 	}
 	if s.publication != nil && s.publication.effects != nil {
 		published.Effects = s.publication.effects.SnapshotInto(published.Effects)

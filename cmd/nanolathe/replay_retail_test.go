@@ -474,8 +474,8 @@ func TestReplayOnlineSeatsRecordTheSameStreamRetail(t *testing.T) {
 		}
 		w.step(1)
 	}
-	if cur := b.sess.Snapshot.Current(); cur.Fog.Valid || b.sess.LocalOwner != 0 {
-		t.Fatal("seat 2's view moved the simulation's owner or kept seat 1's fog")
+	if cur := b.sess.Snapshot.Current(); !cur.Fog.Valid || cur.Fog.Source != ^b.sess.Vis.PresentationIdentity() || b.sess.LocalOwner != 0 {
+		t.Fatal("seat 2's view moved the simulation's owner or did not draw seat 2's own fog")
 	}
 	p.SkipTo(p.FinalTick())
 	for i := 0; !p.Ended(); i++ {

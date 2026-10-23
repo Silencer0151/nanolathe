@@ -23,6 +23,7 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/headless"
 	"github.com/nanolathe-gg/nanolathe/internal/replay"
 	"github.com/nanolathe-gg/nanolathe/internal/session"
+	"github.com/nanolathe-gg/nanolathe/internal/units"
 )
 
 // replaySpeed is one playback speed: Quarters quarter ticks per host step,
@@ -438,6 +439,37 @@ func (p *replayPlayback) applyPerspective() {
 	_ = p.sess.SetPresentationPerspective(view)
 }
 
+// centerOnViewedSeat puts the chosen seat's commander, or failing that its
+// first live unit, at the centre of the battle view when the viewer switches
+// to that seat, so the view opens on what that player can see rather than on
+// fog. The full-map view keeps the camera. A playback steps its battle on
+// this goroutine, so the live units are read between pumps.
+func (b *battleSession) centerOnViewedSeat(p *replayPlayback) {
+	if b.cam == nil || b.sess == nil || b.sess.Units == nil || p.perspective < 0 || p.perspective >= len(p.perspectives) {
+		return
+	}
+	v := p.perspectives[p.perspective]
+	if v.FullMap {
+		return
+	}
+	var first *units.Unit
+	for _, u := range b.sess.Units.IterSliced() {
+		if !u.Alive || u.Owner != v.Seat {
+			continue
+		}
+		if u.Def != nil && u.Def.Commander {
+			first = u
+			break
+		}
+		if first == nil {
+			first = u
+		}
+	}
+	if first != nil {
+		b.cam.JumpToBattleViewCenter(int32(first.X>>16), int32(first.Z>>16))
+	}
+}
+
 // replaySpeedClock is the clock speed word for a playback speed, read only
 // by the Enhanced blend (tickFraction) so a slow playback moves smoothly
 // between its ticks; a playback runs recorded pumps, never the clock's
@@ -488,6 +520,9 @@ func (b *battleSession) pumpReplayPlayback(cl *client.Client) {
 		p.presentedPaused = paused
 	}
 	if !p.presented || p.viewChanged {
+		if p.presented {
+			b.centerOnViewedSeat(p)
+		}
 		p.applyPerspective()
 		// The selection follows the view: units of the seat left behind
 		// are no longer selectable (selectionOwner).

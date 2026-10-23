@@ -1812,8 +1812,15 @@ through phase 1. The first checksum that differs ends the playback with
 the tick it diverged at. A playback runs as the recorded seat and takes no
 commands of its own; the simulation's local and viewing seats never move.
 Viewing is presentation only (`SetPresentationPerspective`): any recorded
-human or computer seat's view, or the full map with fog off. Taking over a
-seat (§10.1) ends the playback and continues the battle live.
+human or computer seat's view — its coverage, line of sight, explored map,
+fog and contacts, and its units to select — or the full map with fog off.
+Another seat's fog is derived from that seat's grids beside the simulation
+viewer's fog cache. In a single-player battle, whose units carry only the
+viewing owner's sensor bits, its contacts come from a presentation bank: the
+five sensor passes run for that seat at the real pass's cadence, writing no
+unit status word, cloak deadline or sensor output the simulation reads.
+Neither changes what a tick computes. Taking over a seat (§10.1) ends the
+playback and continues the battle live.
 
 **Watching.** The main menu's REPLAYS button opens the Replays screen
 (DESIGN_INTERFACE_HUD_INPUT "Replays"). It lists the replay directory
