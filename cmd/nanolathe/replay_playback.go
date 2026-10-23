@@ -489,6 +489,9 @@ func (b *battleSession) pumpReplayPlayback(cl *client.Client) {
 	}
 	if !p.presented || p.viewChanged {
 		p.applyPerspective()
+		// The selection follows the view: units of the seat left behind
+		// are no longer selectable (selectionOwner).
+		b.localState().ReplaceSelection(b.localRefs(b.selectedHandlesInSlotOrder()))
 	}
 	p.presented = true
 	skipping := p.skipTarget != 0

@@ -282,7 +282,7 @@ func (b *battleSession) ownSelectableUnit(f *frame.Frame, v frame.UnitView) bool
 	if b == nil || b.sess == nil || v.Slot == 0 {
 		return false
 	}
-	if v.Owner != b.sess.LocalOwner {
+	if v.Owner != b.selectionOwner() {
 		return false
 	}
 	return b.selectionReadyView(f, v)

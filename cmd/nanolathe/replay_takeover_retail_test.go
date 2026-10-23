@@ -55,14 +55,19 @@ func TestReplayTakeoverWindowRetail(t *testing.T) {
 					p.SetPaused(true)
 					w.step(1)
 					at := p.Tick()
-					// Watching the recorded seat, select its commander and move
-					// the camera; both must survive taking that seat over.
+					// Watching the seat, select its commander and move the
+					// camera; both must survive taking that seat over.
 					var watched pool.Handle
-					if owner == b.sess.LocalOwner {
-						watched = localCommanderOf(t, b.sess).Handle
-						if _, err := b.submitHumanCommand(session.HumanCommand{Kind: session.HumanSelectionReplace, Selection: session.HumanSelectionCommand{Handles: []pool.Handle{watched}}}); err != nil {
-							t.Fatal(err)
+					for _, u := range b.sess.Units.IterSliced() {
+						if u.Alive && u.Owner == owner && u.Def != nil && u.Def.Commander {
+							watched = u.Handle
 						}
+					}
+					if _, err := b.submitHumanCommand(session.HumanCommand{Kind: session.HumanSelectionReplace, Selection: session.HumanSelectionCommand{Handles: []pool.Handle{watched}}}); err != nil {
+						t.Fatal(err)
+					}
+					if got := b.selectedHandlesInSlotOrder(); watched == 0 || len(got) != 1 || got[0] != watched {
+						t.Fatalf("the viewed seat's commander %d cannot be selected while watching: %v", watched, got)
 					}
 					b.cam.JumpTo(b.cam.X+64, b.cam.Z+32)
 					camX, camZ := b.cam.X, b.cam.Z
@@ -90,7 +95,7 @@ func TestReplayTakeoverWindowRetail(t *testing.T) {
 					if b.playback != nil || b.takeover == nil || b.sess.LocalOwner != owner || b.hud.owner != owner || b.sess.Clock.GlobalTick != at || b.sess.Clock.Paused || b.sess.Clock.Active != 10 {
 						t.Fatalf("takeover did not transfer at tick %d: playback %v, takeover %v, owner %d, HUD %d, clock %+v; notice %s", at, b.playback != nil, b.takeover != nil, b.sess.LocalOwner, b.hud.owner, b.sess.Clock, p.overlay.notice)
 					}
-					if got := b.selectedHandlesInSlotOrder(); watched != 0 && (len(got) != 1 || got[0] != watched) || watched == 0 && len(got) != 0 {
+					if got := b.selectedHandlesInSlotOrder(); len(got) != 1 || got[0] != watched {
 						t.Fatalf("the watched selection did not carry over: %v, want %v", got, watched)
 					}
 					if b.cam.X != camX || b.cam.Z != camZ {
