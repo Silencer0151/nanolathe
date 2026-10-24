@@ -23,6 +23,8 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/headless"
 	"github.com/nanolathe-gg/nanolathe/internal/replay"
 	"github.com/nanolathe-gg/nanolathe/internal/session"
+	"github.com/nanolathe-gg/nanolathe/internal/units"
+	"github.com/nanolathe-gg/nanolathe/vfs"
 )
 
 // replaySpeed is one playback speed: Quarters quarter ticks per host step,
@@ -47,8 +49,8 @@ const (
 	replaySkipChunk = 30
 )
 
-// replayPerspective is one view a playback offers: a recorded human seat's,
-// with that seat's fog, or the whole map without fog.
+// replayPerspective is one view a playback offers: a recorded human or
+// computer seat's coverage, or the whole map without fog.
 type replayPerspective struct {
 	Label   string
 	Seat    uint8
@@ -145,21 +147,32 @@ func replayContent(cs *contentSet, h replay.Header, progress content.Progress) (
 		// An undecodable configuration is replay.Compose's refusal to name.
 		return c, nil, nil
 	}
-	entries := config.Request().RoomContent
-	archives, err := baseArchives(cs)
-	if err != nil {
-		return c, nil, err
-	}
-	plan := resolveRoomContent(cs, archives, installedMapPackages(), libraryAddonsOf(), entries)
-	if len(plan.missing) > 0 {
-		return c, nil, &roomContentMissingError{missing: plan.missing}
-	}
-	mounted, view, err := roomContentFS(cs, plan)
+	mounted, view, err := mountRoomContent(cs, config.Request().RoomContent)
 	if err != nil {
 		return c, nil, err
 	}
 	c.FS = view
 	return c, mounted, nil
+}
+
+// mountRoomContent mounts a recorded room's content from this install, as
+// the room named it (DESIGN_MULTIPLAYER §16.8): for a playback, and for the
+// load of a continued online replay's offline save (§10.1). Content this
+// install lacks is a *roomContentMissingError. The closer releases the mount.
+func mountRoomContent(cs *contentSet, entries []session.MatchContentEntry) (io.Closer, vfs.FSOps, error) {
+	archives, err := baseArchives(cs)
+	if err != nil {
+		return nil, nil, err
+	}
+	plan := resolveRoomContent(cs, archives, installedMapPackages(), libraryAddonsOf(), entries)
+	if len(plan.missing) > 0 {
+		return nil, nil, &roomContentMissingError{missing: plan.missing}
+	}
+	mounted, view, err := roomContentFS(cs, plan)
+	if err != nil {
+		return nil, nil, err
+	}
+	return mounted, view, nil
 }
 
 // roomContentMissingError is a recorded room's content this install lacks.
@@ -232,12 +245,15 @@ func newReplayPlayback(path string, data []byte, cs *contentSet, progress conten
 	}
 	p := &replayPlayback{path: path, header: h, sess: sess, player: player, speed: replayNormalSpeed, roomFS: roomFS}
 	for i, seat := range h.Seats {
-		if seat.Role != session.MatchRoleHuman {
+		if seat.Role != session.MatchRoleHuman && seat.Role != session.MatchRoleComputer {
 			continue
 		}
 		label := seat.Name
 		if label == "" {
 			label = fmt.Sprintf("Player %d", i+1)
+		}
+		if seat.Role == session.MatchRoleComputer {
+			label += " (computer)"
 		}
 		if uint8(i) == h.LocalSeat {
 			p.perspective = len(p.perspectives)
@@ -435,6 +451,37 @@ func (p *replayPlayback) applyPerspective() {
 	_ = p.sess.SetPresentationPerspective(view)
 }
 
+// centerOnViewedSeat puts the chosen seat's commander, or failing that its
+// first live unit, at the centre of the battle view when the viewer switches
+// to that seat, so the view opens on what that player can see rather than on
+// fog. The full-map view keeps the camera. A playback steps its battle on
+// this goroutine, so the live units are read between pumps.
+func (b *battleSession) centerOnViewedSeat(p *replayPlayback) {
+	if b.cam == nil || b.sess == nil || b.sess.Units == nil || p.perspective < 0 || p.perspective >= len(p.perspectives) {
+		return
+	}
+	v := p.perspectives[p.perspective]
+	if v.FullMap {
+		return
+	}
+	var first *units.Unit
+	for _, u := range b.sess.Units.IterSliced() {
+		if !u.Alive || u.Owner != v.Seat {
+			continue
+		}
+		if u.Def != nil && u.Def.Commander {
+			first = u
+			break
+		}
+		if first == nil {
+			first = u
+		}
+	}
+	if first != nil {
+		b.cam.JumpToBattleViewCenter(int32(first.X>>16), int32(first.Z>>16))
+	}
+}
+
 // replaySpeedClock is the clock speed word for a playback speed, read only
 // by the Enhanced blend (tickFraction) so a slow playback moves smoothly
 // between its ticks; a playback runs recorded pumps, never the clock's
@@ -485,7 +532,13 @@ func (b *battleSession) pumpReplayPlayback(cl *client.Client) {
 		p.presentedPaused = paused
 	}
 	if !p.presented || p.viewChanged {
+		if p.presented {
+			b.centerOnViewedSeat(p)
+		}
 		p.applyPerspective()
+		// The selection follows the view: units of the seat left behind
+		// are no longer selectable (selectionOwner).
+		b.localState().ReplaceSelection(b.localRefs(b.selectedHandlesInSlotOrder()))
 	}
 	p.presented = true
 	skipping := p.skipTarget != 0

@@ -396,3 +396,44 @@ func TestSidecarSchemaFollowsGeneratedMap(t *testing.T) {
 		})
 	}
 }
+
+// A continued online replay's offline save selects schema 6, beside any of
+// the other records, and earlier schemas refuse its record
+// (docs/DESIGN_MULTIPLAYER.md §10.1).
+func TestSidecarSchemaFollowsOnlineReplay(t *testing.T) {
+	record := &SidecarOnlineReplay{
+		Content:     []SidecarRoomContent{{Kind: 1, Name: "totala1.hpi", Size: 7, SHA256: strings.Repeat("cd", 32)}},
+		Difficulty:  []SidecarSeatDifficulty{{Player: 2, Difficulty: 0}, {Player: 3, Difficulty: 2}},
+		SharedSight: true,
+	}
+	for _, s := range []Sidecar{
+		{OnlineReplay: record},
+		{OnlineReplay: record, GeneratedMap: json.RawMessage(`{"name":"gen"}`), Survival: json.RawMessage(`{"version":1}`),
+			Addons: []SidecarAddon{{ID: "cavedog-bonus-units", Version: "original", SHA256: strings.Repeat("ab", 32)}}},
+	} {
+		bank := filepath.Join(t.TempDir(), "continued.SAV")
+		if err := WriteSidecar(bank, s); err != nil {
+			t.Fatal(err)
+		}
+		got, ok, err := ReadSidecar(bank)
+		if err != nil || !ok || got.Schema != SidecarSchemaOnlineReplay || !reflect.DeepEqual(got.OnlineReplay, record) {
+			t.Fatalf("ReadSidecar = (schema %d, %+v, %v, %v), want schema 6 with the record", got.Schema, got.OnlineReplay, ok, err)
+		}
+	}
+	for _, tc := range []struct{ name, body, want string }{
+		{"schema 6 without", `{"schema":6}`, "schema 6 without a continued online replay"},
+		{"schema 5 with", `{"schema":5,"generatedMap":{},"onlineReplay":{}}`, "schema 5 with a continued online replay"},
+		{"bad content", `{"schema":6,"onlineReplay":{"content":[{"kind":4,"name":"x","sha256":"` + strings.Repeat("ab", 32) + `"}]}}`, "a room content entry"},
+		{"repeated seat", `{"schema":6,"onlineReplay":{"difficulty":[{"player":2,"difficulty":1},{"player":2,"difficulty":0}]}}`, "a computer seat difficulty"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			bank := filepath.Join(t.TempDir(), "continued.SAV")
+			if err := os.WriteFile(SidecarPath(bank), []byte(tc.body), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if _, ok, err := ReadSidecar(bank); err == nil || ok || !strings.Contains(err.Error(), "unreadable: "+tc.want) {
+				t.Fatalf("ReadSidecar = (%v, %v), want a refusal for %s", ok, err, tc.want)
+			}
+		})
+	}
+}

@@ -32,7 +32,10 @@ import (
 //     writes the frame's other channels and its own caches, never a unit, a
 //     queue, a route or a service a worker reads. The fog rebuild — the one
 //     publication step that writes a word a worker's visibility sample reads —
-//     runs before the channel starts (publishFrame).
+//     runs before the channel starts (publishFrame), as does a playback's
+//     presentation sensor pass, whose bank the workers read and which swaps
+//     the visibility service's sensor diagnostics while it runs
+//     (replay_view.go).
 //   - The frame is committed only after every worker has joined.
 //
 // A session with too few units for the fork to pay builds the channel inline,
@@ -68,6 +71,10 @@ type unitChannel struct {
 
 	viewer uint8
 	reveal bool
+	// bank says this publication's status words come from the perspective's
+	// presentation sensor bank, for a viewer other than the viewing owner
+	// (replay_view.go), rather than from the simulation's own.
+	bank   bool
 	chunks int
 	next   atomic.Int64 // the next unclaimed chunk
 
@@ -79,14 +86,21 @@ type unitChannel struct {
 	// raises it after the join exactly as the inline build would have.
 	failure atomic.Pointer[workerPanic]
 	pending bool
+
+	// perspective is the storage a playback draws another viewer from
+	// (replay_view.go). It lives with the channel, whose workers read its
+	// sensor bank, and outlasts each publication.
+	perspective perspectiveView
 }
 
 type workerPanic struct{ value any }
 
 // startUnitChannel decides every order-dependent part of the unit channel on
 // the calling goroutine and starts the workers. finishUnitChannel must follow
-// before anything reads the frame's unit, order-queue or radar channels.
-func (s *Session) startUnitChannel(published *frame.Frame, viewer uint8, reveal bool) *unitChannel {
+// before anything reads the frame's unit, order-queue or radar channels. bank
+// selects the perspective's presentation sensor bank, which must be complete
+// before this is called.
+func (s *Session) startUnitChannel(published *frame.Frame, viewer uint8, reveal, bank bool) *unitChannel {
 	c := &s.unitChannel
 	publication := s.ensurePublicationState()
 	// The Community reload table is built on first use; build it here so no
@@ -94,7 +108,7 @@ func (s *Session) startUnitChannel(published *frame.Frame, viewer uint8, reveal 
 	s.communityReloadNames()
 	c.live = s.Units.AppendLive(c.live[:0]) // pool slot ascending (I1)
 	n := len(c.live)
-	c.viewer, c.reveal = viewer, reveal
+	c.viewer, c.reveal, c.bank = viewer, reveal, bank
 	c.ids = resizeKeep(c.ids, n)
 	c.queued = resizeKeep(c.queued, n)
 	c.chunks = (n + publishChunkUnits - 1) / publishChunkUnits
@@ -174,13 +188,26 @@ func (s *Session) buildUnitChunks(c *unitChannel, scratch *unitPublishScratch) {
 		q := int(c.queueAt[k])
 		for i := lo; i < hi; i++ {
 			u := c.live[i]
-			if queue, ok := s.fillUnitView(&c.views[i], u, c.ids[i], c.queued[i], c.viewer, c.reveal, scratch); ok {
+			// The sensor status word is a pure read of the latched sensor
+			// pass, read once for the view and the contact.
+			status := s.publishedSensorStatus(c, u)
+			if queue, ok := s.fillUnitView(&c.views[i], u, c.ids[i], c.queued[i], c.viewer, c.reveal, status, scratch); ok {
 				setOrderQueueView(c.queues, q, queue, s.Catalog)
 				q++
 			}
-			s.fillUnitContact(&c.contacts[i], u, c.viewer, c.reveal)
+			s.fillUnitContact(&c.contacts[i], u, c.viewer, c.reveal, status)
 		}
 	}
+}
+
+// publishedSensorStatus is the status word the channel publishes for u: the
+// perspective's presentation bank when the channel reads it, otherwise the
+// simulation's own word for the viewer.
+func (s *Session) publishedSensorStatus(c *unitChannel, u *units.Unit) uint32 {
+	if c.bank {
+		return c.perspective.sensorStatus(c.viewer, u)
+	}
+	return s.sensorStatus(c.viewer, u)
 }
 
 // finishUnitChannel builds the chunks no worker has claimed, joins the
