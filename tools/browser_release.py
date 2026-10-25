@@ -14,6 +14,10 @@ deleted. So nothing here moves a tag or uploads to a published release. gh
 creates each release as a draft, uploads the assets and publishes it once; a
 re-run of the same workflow run finds its complete release and leaves it
 alone. The flow is the same when immutability is off.
+
+The native release build (tools/native_build.py) publishes the same way, as
+"native-<run number>" prereleases through tools/native-publish: the unsigned
+executables of every push to main, for the launcher's Latest channel.
 """
 import argparse
 import json
@@ -21,7 +25,23 @@ import os
 import subprocess
 import sys
 
+from native_build import ASSETS as NATIVE_ASSETS
+
 ASSETS = ("nanolathe-browser.tar.gz", "build.json", "SHA256SUMS")
+
+# Each published kind's tag prefix, assets, title and notes. Pruning only
+# ever touches a kind's own prefix.
+KINDS = {
+    "browser": ("browser-", ASSETS, "Browser build {short}",
+                "Asset-free browser build of main at {revision}, workflow run {run}. "
+                "Published automatically on every push to main; the website serves the newest complete "
+                "{prefix}* release at https://nanolathe.gg/play/ (docs/DESIGN_BROWSER_HOST.md §6)."),
+    "native": ("native-", NATIVE_ASSETS, "Native build {short}",
+               "Unsigned Windows and Linux executables of main at {revision}, workflow run {run}, stamped "
+               "exactly as the source installers stamp them (docs/DESIGN_MULTIPLAYER.md §8.7). Published "
+               "automatically on every push to main for the launcher's Latest channel; SHA256SUMS lists "
+               "every asset. Original Total Annihilation game assets are not included."),
+}
 
 
 def run_number(tag, prefix):
@@ -89,48 +109,48 @@ def delete_release(repository, release):
         gh("api", "-X", "DELETE", f"repos/{repository}/git/refs/tags/{release['tag_name']}")
 
 
-def main(argv=None):
+def main(argv=None, kind="browser"):
+    default_prefix, assets, title, notes = KINDS[kind]
+    command = f"{kind}-publish"
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--repository", default=os.environ.get("GH_REPO"), help="owner/name, default $GH_REPO")
     parser.add_argument("--revision", required=True, help="the main commit the release targets")
     parser.add_argument("--run-number", required=True, type=int, help="the workflow run number, which names the tag")
-    parser.add_argument("--prefix", default="browser-")
+    parser.add_argument("--prefix", default=default_prefix)
     parser.add_argument("--keep", default=2, type=int, help="complete releases to keep, counting this run's")
     parser.add_argument("--dry-run", action="store_true", help="list releases and print the plan; change nothing")
-    parser.add_argument("files", nargs="+", help=f"the distribution assets: {', '.join(ASSETS)}")
+    parser.add_argument("files", nargs="+", help=f"the distribution assets: {', '.join(assets)}")
     args = parser.parse_args(argv)
     if not args.repository:
         parser.error("--repository or $GH_REPO is required")
     names = tuple(os.path.basename(path) for path in args.files)
-    if sorted(names) != sorted(ASSETS):
-        parser.error(f"expected exactly the assets {', '.join(ASSETS)}")
+    if sorted(names) != sorted(assets):
+        parser.error(f"expected exactly the assets {', '.join(assets)}")
     for path in args.files:
         if not os.path.isfile(path):
             parser.error(f"{path}: not a file")
     tag = f"{args.prefix}{args.run_number}"
-    title = f"Browser build {args.revision[:7]}"
-    notes = (f"Asset-free browser build of main at {args.revision}, workflow run {args.run_number}. "
-             "Published automatically on every push to main; the website serves the newest complete "
-             f"{args.prefix}* release at https://nanolathe.gg/play/ (docs/DESIGN_BROWSER_HOST.md §6).")
+    title = title.format(short=args.revision[:7])
+    notes = notes.format(revision=args.revision, run=args.run_number, prefix=args.prefix)
 
     current, prune = plan(list_releases(args.repository), args.prefix, args.run_number, args.keep, names)
     if current:
-        print(f"browser-publish: {tag} is already published with its assets")
+        print(f"{command}: {tag} is already published with its assets")
     elif args.dry_run:
-        print(f"browser-publish: would publish {tag} at {args.revision} with {', '.join(names)}")
+        print(f"{command}: would publish {tag} at {args.revision} with {', '.join(names)}")
     else:
         gh("release", "create", tag, *args.files, "--repo", args.repository, "--target", args.revision,
            "--prerelease", "--latest=false", "--title", title, "--notes", notes)
         if not complete(release_by_tag(args.repository, tag), names):
-            raise SystemExit(f"browser-publish: {tag} was published without all of its assets")
-        print(f"browser-publish: published {tag} at {args.revision}")
+            raise SystemExit(f"{command}: {tag} was published without all of its assets")
+        print(f"{command}: published {tag} at {args.revision}")
     for release in prune:
-        kind = "draft" if release.get("draft") else "release"
+        state = "draft" if release.get("draft") else "release"
         if args.dry_run:
-            print(f"browser-publish: would delete {kind} {release.get('tag_name')}")
+            print(f"{command}: would delete {state} {release.get('tag_name')}")
             continue
         delete_release(args.repository, release)
-        print(f"browser-publish: deleted {kind} {release.get('tag_name')}")
+        print(f"{command}: deleted {state} {release.get('tag_name')}")
     output = os.environ.get("GITHUB_OUTPUT")
     if output and not args.dry_run:
         with open(output, "a") as handle:

@@ -1,0 +1,9 @@
+#!/usr/bin/env python3
+"""Package a native build into release assets and SHA256SUMS; see native_build.py."""
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from native_build import package_main  # noqa: E402
+
+sys.exit(package_main())
