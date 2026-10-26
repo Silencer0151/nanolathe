@@ -200,6 +200,7 @@ func (a *app) install() {
 	a.mu.Unlock()
 	a.task("Installing", "", func() error {
 		if err := a.in.InstallLauncher(a.running); err != nil {
+			//lint:ignore ST1005 status text, shown to the player as written
 			return fmt.Errorf("Could not install the launcher: %w", err)
 		}
 		version := ""
@@ -207,6 +208,7 @@ func (a *app) install() {
 			version = game.Version
 		}
 		if err := shell.Register(shell.Entries{Base: a.in.Base, Launcher: a.in.InstalledLauncher(), Version: version, Desktop: desktop}); err != nil {
+			//lint:ignore ST1005 status text, shown to the player as written
 			return fmt.Errorf("Could not add the Start Menu shortcut: %w", err)
 		}
 		if err := startInstalled(a.in.InstalledLauncher(), a.in.Base); err != nil {
@@ -244,6 +246,7 @@ func (a *app) update() {
 		version := a.game.Version
 		a.mu.Unlock()
 		if launcherErr != nil {
+			//lint:ignore ST1005 status text, shown to the player as written
 			return fmt.Errorf("Updated to %s, but the launcher could not update itself: %w", version, launcherErr)
 		}
 		a.setStatus("Updated to " + version + ".")
@@ -267,6 +270,7 @@ func (a *app) play() {
 			a.root = ""
 			a.mu.Unlock()
 			a.chooseFolder(true)
+			//lint:ignore ST1005 status text, shown to the player as written
 			return errors.New("The remembered game folder is no longer usable. Choose it again.")
 		}
 		return a.start(root)
@@ -275,6 +279,7 @@ func (a *app) play() {
 
 func (a *app) start(root string) error {
 	if _, logName, err := a.in.Start(root); err != nil {
+		//lint:ignore ST1005 status text, shown to the player as written
 		return fmt.Errorf("Could not start the game: %w (log %s)", err, logName)
 	}
 	a.mu.Lock()
@@ -313,6 +318,7 @@ func (a *app) chooseFolder(launchNext bool) {
 func (a *app) useFolder(root string) {
 	a.task("Checking", "Checking "+root, func() error {
 		if !a.checkRoot(root) {
+			//lint:ignore ST1005 status text, shown to the player as written
 			return errors.New("That folder is not a usable Total Annihilation installation. Its log is in the logs folder.")
 		}
 		if err := a.in.Remember(root); err != nil {
