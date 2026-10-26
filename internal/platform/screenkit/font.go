@@ -172,12 +172,6 @@ func (f *Font) run(dst *ebiten.Image, text string, x, y float64, s Style) {
 	if bottom == (color.RGBA{}) {
 		bottom = top
 	}
-	// Pick the mip whose texel footprint is closest to one pixel from above,
-	// so linear filtering never has to span more than two texels.
-	level := 0
-	for scale*math.Pow(2, float64(level+1)) <= 1.0001 {
-		level++
-	}
 	pen, prev := x, rune(0)
 	for _, r := range text {
 		g, n := f.glyph(r)
@@ -189,13 +183,21 @@ func (f *Font) run(dst *ebiten.Image, text string, x, y float64, s Style) {
 			pen += g.advance * scale
 			continue
 		}
+		// Pick the mip whose texel footprint is closest to one pixel from
+		// above, so linear filtering never has to span more than two texels.
+		// A level-0 texel covers units face units, so a glyph rasterized below
+		// the atlas resolution starts from a larger footprint.
+		u := g.units
+		level := 0
+		for scale*u*math.Pow(2, float64(level+1)) <= 1.0001 {
+			level++
+		}
 		l := min(level, len(g.levels)-1)
 		img := g.levels[l]
 		levelScale := math.Pow(2, float64(l))
 		b := img.Bounds()
 		// Level images carry a two-texel border at level 0, halved per level,
 		// so a border texel spans units face units and half of them per level.
-		u := g.units
 		border := 2 * u / levelScale
 		gx := pen + (g.left-border)*scale
 		gy := y + (g.top-border)*scale
@@ -253,9 +255,18 @@ func noBreakBefore(r rune) bool {
 	return strings.ContainsRune("。，、；：？！）〕〉》」』】’”·…％", r)
 }
 
+// noBreakAfter reports the opening punctuation a line may not end with.
+func noBreakAfter(r rune) bool {
+	return strings.ContainsRune("（〔〈《「『【‘“", r)
+}
+
 // wrapParagraph breaks one paragraph. Latin words stay whole; a run of wide
 // characters may break between any two of them, which is how a Chinese line
-// fills its column when it has no spaces to break at.
+// fills its column when it has no spaces to break at. A closing mark that
+// touches the text before it travels with that text, and an opening mark
+// with the text after it, so neither strands at a line's edge. Only marks
+// written without a space are bound: Latin text breaks only at spaces, so its
+// lines are those of a plain word wrap, " · " separators included.
 func (f *Font) wrapParagraph(para string, s Style, width float64) []string {
 	type token struct {
 		text  string
@@ -264,9 +275,22 @@ func (f *Font) wrapParagraph(para string, s Style, width float64) []string {
 	var tokens []token
 	pending := false
 	var word strings.Builder
+	// glue binds the next token to the last one: that one opened a quote
+	// or bracket the next token's text starts inside.
+	glue := false
+	push := func(t token) {
+		r := []rune(t.text)
+		single := len(r) == 1
+		if len(tokens) > 0 && !t.space && (glue || single && noBreakBefore(r[0])) {
+			tokens[len(tokens)-1].text += t.text
+		} else {
+			tokens = append(tokens, t)
+		}
+		glue = single && noBreakAfter(r[0])
+	}
 	flushWord := func() {
 		if word.Len() > 0 {
-			tokens = append(tokens, token{text: word.String(), space: pending})
+			push(token{text: word.String(), space: pending})
 			word.Reset()
 			pending = false
 		}
@@ -278,7 +302,7 @@ func (f *Font) wrapParagraph(para string, s Style, width float64) []string {
 			pending = true
 		case wide(r):
 			flushWord()
-			tokens = append(tokens, token{text: string(r), space: pending})
+			push(token{text: string(r), space: pending})
 			pending = false
 		default:
 			word.WriteRune(r)
@@ -288,24 +312,15 @@ func (f *Font) wrapParagraph(para string, s Style, width float64) []string {
 
 	var lines []string
 	line := ""
-	for i, t := range tokens {
+	for _, t := range tokens {
 		joined := t.text
 		if line != "" && t.space {
 			joined = line + " " + t.text
 		} else if line != "" {
 			joined = line + t.text
 		}
-		fits := f.Measure(joined, s) <= width
-		if fits || line == "" {
+		if f.Measure(joined, s) <= width || line == "" {
 			line = joined
-			continue
-		}
-		// A closing mark never opens a line: pull the character before it
-		// along instead, as a Chinese column would.
-		if len([]rune(t.text)) == 1 && noBreakBefore([]rune(t.text)[0]) && i > 0 {
-			line += t.text
-			lines = append(lines, line)
-			line = ""
 			continue
 		}
 		lines = append(lines, line)
