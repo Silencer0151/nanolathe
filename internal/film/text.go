@@ -121,10 +121,11 @@ func buildRun(text string, x, baseline float64, style TextStyle) *mask {
 		}
 		if len(g.levels) > 0 {
 			placed = append(placed, placedGlyph{g, pen})
-			minX = math.Min(minX, pen+float64(g.Left-3)*scale)
-			maxX = math.Max(maxX, pen+float64(g.Left+g.W+3)*scale)
-			minY = math.Min(minY, baseline+float64(g.Top-3)*scale)
-			maxY = math.Max(maxY, baseline+float64(g.Top+g.H+3)*scale)
+			u := g.units()
+			minX = math.Min(minX, pen+(float64(g.Left)-3*u)*scale)
+			maxX = math.Max(maxX, pen+(float64(g.Left)+(float64(g.W)+3)*u)*scale)
+			minY = math.Min(minY, baseline+(float64(g.Top)-3*u)*scale)
+			maxY = math.Max(maxY, baseline+(float64(g.Top)+(float64(g.H)+3)*u)*scale)
 		}
 		pen += g.Advance * scale
 		previous = normalized
@@ -134,15 +135,18 @@ func buildRun(text string, x, baseline float64, style TextStyle) *mask {
 	m := newMask(x0, y0, int(math.Ceil(maxX))-x0+2, int(math.Ceil(maxY))-y0+2)
 	for _, item := range placed {
 		g := item.g
+		// A texel covers units face units: one for the Latin faces, more for
+		// glyphs rasterized below the atlas resolution (the CJK additions).
+		u := g.units()
 		level, factor := 0, 1.0
-		for level+1 < len(g.levels) && scale*factor < 0.5 {
+		for level+1 < len(g.levels) && scale*u*factor < 0.5 {
 			level++
 			factor *= 2
 		}
 		bitmap := g.levels[level]
-		pixelScale := scale * factor
-		left := item.x + float64(g.Left-2)*scale
-		top := baseline + float64(g.Top-2)*scale
+		pixelScale := scale * u * factor
+		left := item.x + (float64(g.Left)-2*u)*scale
+		top := baseline + (float64(g.Top)-2*u)*scale
 		x1 := max(0, int(math.Floor(left-pixelScale))-m.x0)
 		y1 := max(0, int(math.Floor(top-pixelScale))-m.y0)
 		x2 := min(m.w, int(math.Ceil(left+float64(bitmap.Bounds().Dx()+1)*pixelScale))-m.x0)

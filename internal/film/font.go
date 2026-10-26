@@ -27,6 +27,14 @@ type atlasGlyph struct {
 	levels []*image.Gray
 }
 
+// units is how many face units one atlas texel of the glyph covers.
+func (g *atlasGlyph) units() float64 {
+	if g.Scale == 0 {
+		return 1
+	}
+	return g.Scale
+}
+
 type atlasFace struct {
 	Cap     float64
 	Glyphs  map[string]*atlasGlyph
