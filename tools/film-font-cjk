@@ -18,6 +18,7 @@ import os
 import json
 from pathlib import Path
 import sys
+import unicodedata
 
 from PIL import Image, ImageDraw, ImageFont
 
@@ -40,7 +41,11 @@ def wanted(catalogs):
     for path in catalogs:
         for text in json.loads(Path(path).read_text(encoding="utf-8")).values():
             chars.update(text)
-    return sorted(c for c in chars if ord(c) > 0x7F)
+    # Only full-width characters: a narrow one such as the middle dot is
+    # Latin punctuation the screen already sets (as a hyphen), and a
+    # full-width Noto copy would change English and Ukrainian text.
+    return sorted(c for c in chars
+                  if ord(c) > 0x7F and unicodedata.east_asian_width(c) in "WF")
 
 
 def load_face(source, weight, size):
