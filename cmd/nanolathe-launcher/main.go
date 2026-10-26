@@ -7,16 +7,21 @@
 // it checks the chosen channel (Stable or Latest) at every start, offers
 // the update, finds or asks for the Total Annihilation folder, and starts
 // the game. It adopts a source installer's directory in place
-// (internal/launcher). With --uninstall it removes the installation.
+// (internal/launcher). With --uninstall it removes the installation; with
+// --update it installs or updates the game without a window, for
+// tools/installer/install.ps1.
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/nanolathe-gg/nanolathe/internal/launcher"
@@ -26,15 +31,20 @@ import (
 
 func main() {
 	uninstallFlag := flag.Bool("uninstall", false, "remove Nanolathe from this computer")
+	updateFlag := flag.Bool("update", false, "install or update the game from its channel without a window, then exit")
 	flag.Parse()
-	if err := run(*uninstallFlag); err != nil {
+	if err := run(*uninstallFlag, *updateFlag); err != nil {
 		fmt.Fprintln(os.Stderr, err)
-		shell.Notify(0, "Nanolathe", err.Error())
+		// A windowless update reports to its caller, never in a dialog
+		// that would stop a script.
+		if !*updateFlag {
+			shell.Notify(0, "Nanolathe", err.Error())
+		}
 		os.Exit(1)
 	}
 }
 
-func run(uninstallRequested bool) error {
+func run(uninstallRequested, updateRequested bool) error {
 	running, err := os.Executable()
 	if err != nil {
 		return err
@@ -47,6 +57,9 @@ func run(uninstallRequested bool) error {
 	if uninstallRequested {
 		return uninstall(in, running)
 	}
+	if updateRequested {
+		return updateNow(in, running)
+	}
 	a := newApp(in, running)
 	ebiten.SetWindowTitle("Nanolathe")
 	ebiten.SetWindowSize(windowW, windowH)
@@ -58,6 +71,54 @@ func run(uninstallRequested bool) error {
 	// another window has focus.
 	ebiten.SetRunnableOnUnfocused(true)
 	return ebiten.RunGame(a)
+}
+
+// updateNow is --update: what the window's Install or Update button does,
+// without a window, so tools/installer/install.ps1 can finish an
+// installation, and move a source installation to the launcher, from a
+// script. It installs the channel's release unless it is already selected,
+// takes the launcher that release ships, and refreshes the Start Menu entry.
+// Progress goes to standard error and to logs/launcher-update-*.log.
+func updateNow(in launcher.Install, running string) error {
+	if !installed(in, running) {
+		return fmt.Errorf("nanolathe: --update runs only from an installed launcher, %s", in.InstalledLauncher())
+	}
+	in.RemoveOldLauncher()
+	if runtime.GOOS == "windows" {
+		adoptSourceInstall(in)
+	}
+	out := io.Writer(os.Stderr)
+	if log, err := in.NewLog("launcher-update"); err == nil {
+		defer log.Close()
+		out = io.MultiWriter(os.Stderr, log)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	defer cancel()
+	src, goarch := launcher.NewSource(), launcher.NativeArch()
+	settings, chosen := in.LoadSettings()
+	rel, ch, err := launcher.Offer(ctx, src, settings, chosen, runtime.GOOS, goarch)
+	if err != nil {
+		return fmt.Errorf("nanolathe: no %s release to install: %w", settings.Channel, err)
+	}
+	fmt.Fprintf(out, "nanolathe: the %s channel offers %s for %s/%s\n", ch, rel.Tag, runtime.GOOS, goarch)
+	if game, ok := in.Selected(); ok && game.Current(rel) {
+		fmt.Fprintf(out, "nanolathe: %s is already installed\n", game.Version)
+	} else if err := in.Update(ctx, src, rel, runtime.GOOS, goarch, nil); err != nil {
+		return err
+	}
+	if replaced, err := in.UpdateLauncher(); err != nil {
+		return fmt.Errorf("nanolathe: the game is installed, but the launcher could not update itself: %w", err)
+	} else if replaced {
+		fmt.Fprintln(out, "nanolathe: the launcher was updated")
+	}
+	game, _ := in.Selected()
+	if runtime.GOOS == "windows" {
+		if err := shell.Register(shell.Entries{Base: in.Base, Launcher: in.InstalledLauncher(), Version: game.Version, Desktop: shell.HasDesktopShortcut()}); err != nil {
+			return fmt.Errorf("nanolathe: could not add the Start Menu shortcut: %w", err)
+		}
+	}
+	fmt.Fprintf(out, "nanolathe: installed %s in %s\n", game.Version, in.Base)
+	return nil
 }
 
 // installationOf is the installation a launcher belongs to: the folder it

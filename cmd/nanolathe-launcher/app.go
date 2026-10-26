@@ -111,20 +111,13 @@ func (a *app) refreshInstalled() {
 func (a *app) check() {
 	a.mu.Lock()
 	a.checkGen++
-	gen, ch, chosen := a.checkGen, a.settings.Channel, a.chosen
-	if !chosen {
-		ch = launcher.Stable
-	}
+	gen, settings, chosen := a.checkGen, a.settings, a.chosen
 	a.checking, a.offered, a.offerErr = true, nil, nil
 	a.mu.Unlock()
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
-		rel, err := a.src.Find(ctx, ch, a.goos, a.goarch)
-		if errors.Is(err, launcher.ErrNoRelease) && !chosen {
-			ch = launcher.Latest
-			rel, err = a.src.Find(ctx, ch, a.goos, a.goarch)
-		}
+		rel, ch, err := launcher.Offer(ctx, a.src, settings, chosen, a.goos, a.goarch)
 		a.mu.Lock()
 		defer a.mu.Unlock()
 		if gen != a.checkGen {
