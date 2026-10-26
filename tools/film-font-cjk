@@ -32,8 +32,9 @@ HANZI_OVER_CAP = 1.2
 INK_PX = 110
 WEIGHT = {"display": int(os.environ.get("FILM_CJK_WEIGHT_DISPLAY", "800")),
           "body": int(os.environ.get("FILM_CJK_WEIGHT_BODY", "400"))}
-# Characters the screen sets outside a catalog: the language card's own name.
-EXTRA = "简体中文"
+# Characters the screen sets outside a catalog: the language card's own name
+# and description.
+EXTRA = "简体中文界面"
 
 
 def wanted(catalogs):
@@ -50,10 +51,9 @@ def wanted(catalogs):
 
 def load_face(source, weight, size):
     font = ImageFont.truetype(source, size)
-    try:
-        font.set_variation_by_axes([weight])
-    except Exception:
-        pass
+    # The weights are axis values of the variable font the README names. A
+    # static font raises here rather than silently setting its own weight.
+    font.set_variation_by_axes([weight])
     return font
 
 

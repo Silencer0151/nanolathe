@@ -75,7 +75,7 @@ func (s *nlScreen) languageCard() nlCard {
 	}
 	return nlCard{
 		key: "language", label: "Language", pics: []string{"armcom", "corcom"}, kind: nlHalves,
-		steps: steps, subs: []string{"The interface as written", "Інтерфейс українською"},
+		steps: steps, subs: []string{"The interface as written", "Інтерфейс українською", "简体中文界面"},
 		get: func(d *nlDraft) int { return d.language },
 		set: func(d *nlDraft, v int) { d.language = v },
 		desc: func(*nlDraft, int) string {
