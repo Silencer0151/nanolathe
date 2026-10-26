@@ -72,5 +72,5 @@ adds what the catalog needs. Distribution source: Google Fonts, commit
   SHA-256 `a3041811a78c361b1de50f953c805e0244951c21c5bd412f7232ef0d899af0da`.
 
 To reproduce, download it outside the checkout, verify the checksum and run
-`python3 tools/film-font-cjk NotoSansSC.ttf internal/i18n/locales/chinese.json`
+`python3 tools/film-font-cjk NOTOSANSSC.ttf internal/i18n/locales/chinese.json`
 (rasterized with Pillow 12.3.0 and FreeType 2.14.3).
