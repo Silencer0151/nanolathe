@@ -1812,7 +1812,15 @@ through phase 1. The first checksum that differs ends the playback with
 the tick it diverged at. A playback runs as the recorded seat and takes no
 commands of its own; the simulation's local and viewing seats never move.
 Viewing is presentation only (`SetPresentationPerspective`): any recorded
-human seat's view, or the full map with fog off.
+human or computer seat's view — its coverage, line of sight, explored map,
+fog and contacts, and its units to select — or the full map with fog off.
+Another seat's fog is derived from that seat's grids beside the simulation
+viewer's fog cache. In a single-player battle, whose units carry only the
+viewing owner's sensor bits, its contacts come from a presentation bank: the
+five sensor passes run for that seat at the real pass's cadence, writing no
+unit status word, cloak deadline or sensor output the simulation reads.
+Neither changes what a tick computes. Taking over a seat (§10.1) ends the
+playback and continues the battle live.
 
 **Watching.** The main menu's REPLAYS button opens the Replays screen
 (DESIGN_INTERFACE_HUD_INPUT "Replays"). It lists the replay directory
@@ -1825,8 +1833,8 @@ mod first mounts that mod through the ordinary content reload, as an online
 join does, and a missing mod, a different copy of it or a missing map is
 named instead. Delete asks first. A playback takes no orders; its overlay
 and keys pause it, step its speed from ¼× to 8×, skip ahead a minute at a
-time, cycle the recorded human seats' views and the full map, and return
-to the Replays screen. At the recording's end, or at the first checksum
+time, cycle the recorded human and computer seats' views and the full map,
+take over the viewed seat (§10.1) and return to the Replays screen. At the recording's end, or at the first checksum
 this build computes differently, it holds there with the end or
 divergence line.
 
@@ -1850,6 +1858,103 @@ silently accepting a different battle. Authored fixtures from the original
 v1 writer lock single-player Strict and Modern and online playback, and an
 original v2 recording locks pre-extension compatibility. Optional header
 and configuration fields are also tested through actual playback.
+
+### 10.1 Replay takeover
+
+**Policy.** A player watching a replay may take over any recorded seat that
+is still playing and continue the battle live from that moment, in every
+gameplay mode, Strict 3.1 included (user-authorized 2026-10-22; Modern AI
+opponents, saves, pause and offline saves of online continuations
+2026-10-23). It changes who supplies input, never
+the bound rule set. It is Nanolathe policy: [08 "Replay"] establishes no
+retail replay to reproduce.
+
+**Choosing a seat.** The playback overlay's Take over button, or End, takes
+the seat whose view is shown (DESIGN_INTERFACE_HUD_INPUT §3.16). Human and
+computer seats are offered; the full-map view, watchers, finally removed or
+eliminated players and Survival's wave attacker are not. A failed or
+diverged playback cannot be continued, and neither can a battle whose result
+has ended. A recording that stopped while the battle was still playable can,
+including at the last complete pump of an incomplete file.
+
+**The handoff.** It happens between completed pumps, on the playback's own
+session, because that session already holds everything a continuation needs
+— units, projectiles, construction, orders, scripts, both simulation random
+streams, resources, allocation identities and every computer controller — and
+a retail-save round trip would lose transient state
+([08 "What is not saved, and the fix-up order that rebuilds it"]). Nothing is
+created, credited or drawn at the handoff. Future recorded input is dropped
+and the checksum verifier detached; new command sequence numbers continue
+after the recording's accepted positions, so they never alias a tracked
+order.
+
+- *The chosen seat* becomes the local human. A chosen computer's controller
+  is stopped and its pending think discarded; its manager keeps weapon
+  maintenance and the strategic refresh on the bound set's human path. It is
+  credited as a human: no Modern full-income mark and no computer seat's own
+  discount word.
+- *Every other recorded human still playing* becomes a Modern AI computer
+  player on its existing manager, paid in full like any Modern player, so no
+  opponent stands idle. Online it keeps its seat row, so its machine's sensor
+  pass, countdown and hosted computers carry on; with no other human left,
+  the local player's result ends the battle. Every computer keeps its
+  controller. A build without the Modern AI refuses the takeover when there
+  is a human to replace.
+- *Sight.* The chosen seat gets ordinary fog. A single-player battle drops
+  the old viewer's contacts from the units' one sensor bank; an online one
+  gives a promoted computer its own sensor bank and result row, keeping its
+  explored history and coverage. No extra sensor pass runs at the handoff,
+  since it could extend shared cloak deadlines; ordinary sensor dues refill
+  the contacts.
+- *The window* loads the chosen side's interface, keeps the selection made
+  while watching (less any unit the player does not own) and the camera, and
+  continues at normal speed, unpaused, posting *Now playing as* and the
+  player's name.
+
+**Afterwards.** A continued single-player replay is an ordinary
+single-player battle: it pauses, changes speed, saves, autosaves and loads.
+Its saves record the replay's configured unit limit and load as a battle of
+the chosen seat, its replaced humans still Modern. A continued online replay
+keeps the online battle's simulation and command admission, run on this
+machine one tick per host step with no relay. It pauses, since nobody else is
+connected, but keeps normal speed.
+
+*Saving a continued online replay.* It saves, autosaves and loads as an
+offline skirmish: the save holds no online rules, so a load builds the
+single-player battle the bank describes, with the local player's one sensor
+picture, one battle result and normal speed control. Its sidecar marks it
+(`onlineReplay`, DESIGN_MODS_MUTATORS §7.2) with what an ordinary skirmish
+save would lose:
+
+- the room content it ran on, which the load mounts as a playback does
+  (§16.8) and refuses, naming it, when this install lacks it;
+- each computer seat's own difficulty word when the room's computers
+  differed (§6.6), so they keep their plan, persona and credits; the seat
+  taken over and the humans the Modern AI plays have none;
+- whether the room's teams shared sight, which the load keeps in every mode,
+  Strict 3.1 included, as the room did.
+
+A save of the loaded battle carries the same record again.
+
+No continuation restarts (a restart enters the recorded setup afresh, as the
+recorded seat), records a replay of its own or counts toward Survival bests;
+a save of one carries no best-run record, so a loaded one is excluded too. The original
+file is never written; reopening it chooses another moment or seat. A
+continuation does not switch seats again.
+
+**Verification.** Session fixtures in every mode lock the pump-boundary
+handoff, dropped future input, command identities that follow the
+recording's, the chosen controller stopped, the other human handed to the
+Modern AI and paid in full, both random streams, resources and units
+unchanged, ineligible seats refused, online command admission, the converted
+seats' rows and the ending once no human plays on, and an online
+continuation's offline save loading with its computers' own difficulties and,
+under Strict 3.1, its team sight. Playback tests keep
+ordinary recordings unchanged. Retail window tests continue a real replay
+from human and computer seats in every mode and Survival, carry over the
+selection and camera, save and load the continuation, and pause a continued
+online replay and save and load it as an offline skirmish on its room's
+content.
 
 ## 11. Seats over time
 

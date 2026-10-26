@@ -54,7 +54,7 @@ func TestReplayOverlayText(t *testing.T) {
 			t.Fatalf("control %d has no hint", c)
 		}
 	}
-	if !slices.Equal(labels, []string{"Pause", "Slower", "Faster", "Skip 1:00", "View", "Exit"}) {
+	if !slices.Equal(labels, []string{"Pause", "Slower", "Faster", "Skip 1:00", "View", "Exit", "Take over"}) {
 		t.Fatalf("labels %v", labels)
 	}
 	if got := testPlayback().overlayView(); got.Map != "ashap plateau" || got.View != "Ann" || got.Views != 3 || got.Ended || got.Message != "" {
@@ -81,6 +81,7 @@ func TestReplayKeysDispatchToThePlayback(t *testing.T) {
 		{text('-'), replayKeySlower}, {text('_'), replayKeySlower},
 		{text(']'), replayKeySkip}, {text('['), replayKeyStopSkip},
 		{edit(input.KeyHome), replayKeyView}, {edit(input.KeyBackspace), replayKeyExit},
+		{edit(input.KeyEnd), replayKeyTakeover},
 		{text('p'), replayKeyNone}, {edit(input.KeyEscape), replayKeyNone}, {edit(input.KeyTab), replayKeyNone},
 		{input.Token{Kind: input.TokenEdit, Key: input.KeyA, Ctrl: true}, replayKeyNone},
 	} {

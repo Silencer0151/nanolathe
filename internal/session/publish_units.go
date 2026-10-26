@@ -34,14 +34,13 @@ type unitPublishScratch struct {
 // unit's queue is to be published (queued, decided by the channel before any
 // view is built), returns its order-queue snapshot. id is the unit's
 // presentation identity, allocated on the calling goroutine in slot order.
+// status is the unit's sensor status word for the viewer
+// (publishedSensorStatus), which feeds four of the view's fields.
 //
 // The view is built THROUGH the destination element rather than as a value
 // that is then copied: UnitView is 256 bytes and this runs for every live unit
 // every tick, which made the copy alone a measurable share of the publication.
-func (s *Session) fillUnitView(vp *frame.UnitView, u *units.Unit, id uint64, queued bool, viewer uint8, reveal bool, scratch *unitPublishScratch) (orders.SnapshotQueue, bool) {
-	// The sensor status word is a pure read of the latched sensor pass; the
-	// view reads it once for all four fields it feeds.
-	status := s.sensorStatus(viewer, u)
+func (s *Session) fillUnitView(vp *frame.UnitView, u *units.Unit, id uint64, queued bool, viewer uint8, reveal bool, status uint32, scratch *unitPublishScratch) (orders.SnapshotQueue, bool) {
 	pieces, cargo := vp.Pieces, vp.Cargo
 	*vp = frame.UnitView{
 		InstanceID:        id,
@@ -234,9 +233,9 @@ func unitQueuePublished(u *units.Unit) bool {
 // fillUnitContact writes one live unit's radar contact through cp. The
 // contact keeps the ring storage the element already held: Reset truncated
 // it to length zero and left its capacity, and reusing it spares a fresh
-// slice for every armed unit every tick [03 §3.9] (R05).
-func (s *Session) fillUnitContact(cp *frame.RadarContactView, u *units.Unit, viewer uint8, reveal bool) {
-	status := s.sensorStatus(viewer, u)
+// slice for every armed unit every tick [03 §3.9] (R05). status is the unit's
+// sensor status word for the viewer (publishedSensorStatus).
+func (s *Session) fillUnitContact(cp *frame.RadarContactView, u *units.Unit, viewer uint8, reveal bool, status uint32) {
 	active := u.Activated
 	onOffable := false
 	// The contact's cloak input is the INSTANCE cloaked bit and

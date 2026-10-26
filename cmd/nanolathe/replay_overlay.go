@@ -4,8 +4,9 @@ package main
 // panel at the top left of the world view, in the side's console face like
 // the online network overlay, that says what is playing and where, and holds
 // the playback's controls — pause, slower, faster, skip ahead, the next
-// perspective and exit — each also on a key. Everything here drives the
-// playback's host controls (replay_playback.go); nothing reaches a tick.
+// perspective, exit and takeover — each also on a key. These drive the
+// playback's host controls; takeover transfers to live play between pumps
+// (DESIGN_MULTIPLAYER §10.1).
 
 import (
 	"fmt"
@@ -27,6 +28,7 @@ const (
 	replayControlSkip
 	replayControlView
 	replayControlExit
+	replayControlTakeover
 	replayControlCount
 )
 
@@ -42,6 +44,7 @@ const (
 	replayKeyStopSkip
 	replayKeyView
 	replayKeyExit
+	replayKeyTakeover
 )
 
 // replaySkipStep is how far one skip goes: a minute of game time.
@@ -54,8 +57,10 @@ type replayOverlayState struct {
 	backdrop image.Rectangle
 	// pressed is the control a left press began on, plus one; the release
 	// over the same control activates it.
-	pressed int
-	exit    bool
+	pressed  int
+	exit     bool
+	takeover bool
+	notice   string
 	// mapName is the map as the map list spells it, when the Replays screen
 	// knows it; the header's otherwise.
 	mapName string
@@ -73,8 +78,9 @@ type replayOverlayView struct {
 	Views         int
 	// Message is the end or divergence line; Failed marks a stop that is
 	// not the recording's end.
-	Message string
-	Failed  bool
+	Message     string
+	Failed      bool
+	CanTakeOver bool
 }
 
 // overlayView is the playback as the overlay shows it now.
@@ -89,6 +95,11 @@ func (p *replayPlayback) overlayView() replayOverlayView {
 	}
 	if s := p.Status(); s.Mismatch != nil || s.Err != nil {
 		v.Failed = true
+	}
+	_, err := p.takeoverChoice()
+	v.CanTakeOver = err == nil
+	if p.overlay.notice != "" {
+		v.Message = p.overlay.notice
 	}
 	return v
 }
@@ -139,6 +150,8 @@ func (v replayOverlayView) label(c replayControl) string {
 		return "View"
 	case replayControlExit:
 		return "Exit"
+	case replayControlTakeover:
+		return "Take over"
 	}
 	return ""
 }
@@ -154,6 +167,8 @@ func (v replayOverlayView) enabled(c replayControl) bool {
 		return v.Speed < len(replaySpeeds)-1
 	case replayControlView:
 		return v.Views > 1
+	case replayControlTakeover:
+		return v.CanTakeOver
 	}
 	return true
 }
@@ -173,6 +188,8 @@ func replayControlHint(c replayControl) string {
 		return "Next player's view, then the full map (Home)"
 	case replayControlExit:
 		return "Back to the Replays screen (Backspace)"
+	case replayControlTakeover:
+		return "Play as the viewed player (End); choose with View"
 	}
 	return ""
 }
@@ -197,6 +214,8 @@ func (p *replayPlayback) activate(c replayControl) {
 		p.apply(replayKeyView)
 	case replayControlExit:
 		p.apply(replayKeyExit)
+	case replayControlTakeover:
+		p.apply(replayKeyTakeover)
 	}
 }
 
@@ -228,11 +247,20 @@ func (p *replayPlayback) apply(k replayKey) {
 	case replayKeyStopSkip:
 		p.CancelSkip()
 	case replayKeyView:
+		p.overlay.notice = ""
 		if n := len(p.perspectives); n > 0 {
 			_ = p.SetPerspective((p.perspective + 1) % n)
 		}
 	case replayKeyExit:
 		p.overlay.exit = true
+	case replayKeyTakeover:
+		if _, err := p.takeoverChoice(); err == nil {
+			p.CancelSkip()
+			p.paused = true
+			p.overlay.takeover = true
+		} else {
+			p.overlay.notice = "Cannot take over: " + noticeReason(err)
+		}
 	}
 }
 
@@ -280,6 +308,8 @@ func replayShortcutKey(in *input.State, kbd *input.KeyboardState, film bool) rep
 		return replayKeyView
 	case kbd.KeyDown(input.KeyBackspace):
 		return replayKeyExit
+	case kbd.KeyDown(input.KeyEnd):
+		return replayKeyTakeover
 	}
 	if in != nil && in.ShortcutTokenMode && in.ShortcutToken.Kind == input.TokenText {
 		switch in.ShortcutToken.Rune {
@@ -421,6 +451,10 @@ func replayWeatherBottom(b *battleSession, fontHeight uint8) int {
 // drawReplayOverlay draws the playback overlay over the world view.
 func (h *retailBattleHUD) drawReplayOverlay(c *client.Client, b *battleSession) {
 	p := b.replayPlayback()
+	if h != nil && c != nil && h.console != nil && b != nil && b.takeover != nil {
+		h.drawReplayTakeover(c, b)
+		return
+	}
 	if h == nil || c == nil || h.console == nil || p == nil {
 		return
 	}
@@ -481,4 +515,24 @@ func (h *retailBattleHUD) drawReplayOverlay(c *client.Client, b *battleSession) 
 	if l.hint != "" {
 		c.UIText(font, l.hint, l.x, y, h.guiColor(7))
 	}
+}
+
+// drawReplayTakeover marks a continued online replay that stopped, where the
+// overlay stood. A running continuation draws nothing: it plays as an
+// ordinary battle (DESIGN_MULTIPLAYER §10.1).
+func (h *retailBattleHUD) drawReplayTakeover(c *client.Client, b *battleSession) {
+	if b.takeover.err == nil {
+		return
+	}
+	line := "Replay continuation stopped"
+	left, top, _ := b.cam.ChromeInset()
+	x := int(left) + 3
+	y := max(int(top)+4, c.MessageColumnBottom()+2, replayWeatherBottom(b, h.console.Height)+2)
+	w, height := client.MeasureText(h.console, line)+6, int(h.console.Height)+5
+	screenW, _ := c.Size()
+	if b.fpsShown() && x+w+2 > screenW-onlineFPSPanelW-onlineFPSPanelMargin {
+		y = max(y, onlineFPSPanelMargin+onlineFPSPanelH+4)
+	}
+	c.UIFillRect(x, y, w, height, h.guiColor(0))
+	c.UIText(h.console, line, x+3, y+2, h.guiColor(14))
 }

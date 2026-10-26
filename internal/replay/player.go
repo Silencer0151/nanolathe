@@ -69,6 +69,7 @@ type Player struct {
 	done         bool
 	truncated    bool
 	end          EndReason
+	takenOver    bool
 }
 
 // verifier observes a single-player playback's checksums where the session
@@ -138,6 +139,43 @@ func (p *Player) Verified() int { return p.verified }
 
 // Mismatch is the first checksum playback computed differently, or nil.
 func (p *Player) Mismatch() *Mismatch { return p.mismatch }
+
+// CanTakeOver checks a local continuation at the last completed pump. A
+// stopped or incomplete recording is usable, but a failed playback is not
+// (DESIGN_MULTIPLAYER §10.1). It changes neither playback nor the session.
+func (p *Player) CanTakeOver(owner uint8) error {
+	if p == nil || p.s == nil || p.takenOver {
+		return fmt.Errorf("nanolathe: replay takeover refused: logical path replay, providers searched [playback], expected an attached playback")
+	}
+	if p.err != nil {
+		return p.err
+	}
+	if p.peekedErr != nil && !errors.Is(p.peekedErr, io.EOF) && !errors.Is(p.peekedErr, ErrTruncated) {
+		return p.peekedErr
+	}
+	if p.s.Clock == nil || p.s.Clock.GlobalTick != p.tick {
+		return fmt.Errorf("nanolathe: replay takeover refused: logical path tick %d, providers searched [playback], expected the last completed replay pump", p.tick)
+	}
+	return p.s.ReplayTakeoverEligible(owner)
+}
+
+// TakeOver releases this playback into a local live continuation. The caller
+// keeps the same session and becomes its sole input/pump owner. The returned
+// stream position is the floor for subsequent online command stamps. No
+// further Step can consume the original recording (DESIGN_MULTIPLAYER §10.1).
+func (p *Player) TakeOver(owner uint8) (uint64, error) {
+	if err := p.CanTakeOver(owner); err != nil {
+		return 0, err
+	}
+	position, err := p.s.TakeOverReplay(owner)
+	if err != nil {
+		return 0, err
+	}
+	p.takenOver, p.done = true, true
+	p.r, p.peeked, p.expected, p.observed = nil, nil, nil, nil
+	p.runCount, p.runTicks = 0, 0
+	return position, nil
+}
 
 // Step runs whole recorded pumps while their ticks stay within maxTicks, and
 // always at least one pump when maxTicks is positive and one remains, since a
