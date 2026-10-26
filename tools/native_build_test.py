@@ -76,6 +76,8 @@ class Package(unittest.TestCase):
             for goos, goarch in native_build.TARGETS:
                 (build / f"{goos}-{goarch}").mkdir(parents=True)
                 (build / f"{goos}-{goarch}" / native_build.executable(goos)).write_bytes(f"{goos}/{goarch}".encode())
+                if goos == "windows":
+                    (build / f"{goos}-{goarch}" / native_build.LAUNCHER).write_bytes(f"launcher {goarch}".encode())
             revision = "a" * 40
             (build / "build.json").write_text(json.dumps({"revision": revision}))
             sums = []
@@ -86,7 +88,10 @@ class Package(unittest.TestCase):
             self.assertEqual([line.split("  ")[1] for line in sums[0].splitlines()], list(ASSETS[:-1]))
             with zipfile.ZipFile(tmp / "one/nanolathe-windows-arm64.zip") as z:
                 self.assertEqual(z.read("nanolathe.exe"), b"windows/arm64")
+                self.assertEqual(z.read(native_build.LAUNCHER), b"launcher arm64")
                 self.assertEqual(z.read("source-revision").decode().strip(), revision)
+            # The download is the x64 launcher, which also runs on ARM64.
+            self.assertEqual((tmp / "one" / native_build.SETUP).read_bytes(), b"launcher amd64")
             with tarfile.open(tmp / "one/nanolathe-linux-amd64.tar.gz") as t:
                 self.assertEqual(t.getmember("nanolathe").mode, 0o755)
                 self.assertEqual(t.extractfile("source-revision").read().decode().strip(), revision)

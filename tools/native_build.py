@@ -12,11 +12,14 @@ every target.
 
 After stamping, each Windows target gets a version resource and icon
 (internal/version/winresgen), which code signing requires. The resource is
-not part of the stamped source, so the stamp stays the same.
+not part of the stamped source, so the stamp stays the same. Windows targets
+also build the launcher (cmd/nanolathe-launcher), with its own resource.
 
-`build` writes one directory per target, holding only its executable, so
+`build` writes one directory per target, holding only its executables, so
 the Windows executables can go to signing as they are, and build.json.
-`package` turns that directory into the release assets and SHA256SUMS.
+`package` turns that directory into the release assets and SHA256SUMS:
+per-platform archives, and Nanolathe-Setup.exe, the x64 launcher a Windows
+player downloads first.
 """
 import argparse
 import gzip
@@ -45,8 +48,16 @@ VARIANTS = (("darwin", "amd64", "v1"), ("darwin", "arm64", "v8.0"), ("linux", "a
 TARGETS = (("windows", "amd64"), ("windows", "arm64"), ("linux", "amd64"), ("linux", "arm64"))
 LEVELS = {"amd64": ("GOAMD64", "v1"), "arm64": ("GOARM64", "v8.0")}
 
+# The Windows launcher (cmd/nanolathe-launcher) is a windowed program. It is
+# not the game and carries no stamp of its own; online play never sees it.
+LAUNCHER = "nanolathe-launcher.exe"
+LAUNCHER_ARGS = ("-mod=readonly", "-trimpath", "-buildvcs=false", "-ldflags=-s -w -H windowsgui", "./cmd/nanolathe-launcher")
+# The download a Windows player starts with: the x64 launcher, which also
+# runs on ARM64 Windows and installs that machine's native build.
+SETUP = "Nanolathe-Setup.exe"
+
 # The release assets, in the order SHA256SUMS lists them.
-ASSETS = ("nanolathe-windows-amd64.zip", "nanolathe-windows-arm64.zip", "nanolathe-linux-amd64.tar.gz",
+ASSETS = ("nanolathe-windows-amd64.zip", "nanolathe-windows-arm64.zip", SETUP, "nanolathe-linux-amd64.tar.gz",
           "nanolathe-linux-arm64.tar.gz", "build.json", "SHA256SUMS")
 # Files from the source tree that ship beside every executable.
 NOTICES = ("LICENSE", "NOTICE.md")
@@ -251,10 +262,13 @@ def build(args):
 
     icon = source / "tools" / "installer" / "windows" / "Nanolathe.ico"
     for goos, goarch in TARGETS:
-        if goos == "windows":
+        if goos != "windows":
+            continue
+        for command, name, description in (("nanolathe", executable(goos), "Nanolathe"),
+                                           ("nanolathe-launcher", LAUNCHER, "Nanolathe Launcher")):
             go(gobin, ["run", "-mod=readonly", "-trimpath", "-buildvcs=false", "./internal/version/winresgen",
-                       "-arch", goarch, "-version", version, "-name", executable(goos), "-description", "Nanolathe",
-                       "-icon", str(icon), "-out", str(source / "cmd" / "nanolathe" / f"rsrc_{goos}_{goarch}.syso")],
+                       "-arch", goarch, "-version", version, "-name", name, "-description", description,
+                       "-icon", str(icon), "-out", str(source / "cmd" / command / f"rsrc_{goos}_{goarch}.syso")],
                source, env)
     for goos, goarch in TARGETS:
         print(f"native-build: building {goos}/{goarch}", flush=True)
@@ -263,6 +277,8 @@ def build(args):
         destination = out / target_dir(goos, goarch)
         destination.mkdir()
         go(gobin, ["build", "-o", str(destination / executable(goos)), *BUILD_ARGS], source, target_env)
+        if goos == "windows":
+            go(gobin, ["build", "-o", str(destination / LAUNCHER), *LAUNCHER_ARGS], source, target_env)
     go(gobin, ["mod", "verify"], source, env)
     if sha256(source / "go.sum") != sum_before:
         raise BuildError("the build changed the pinned go.sum")
@@ -325,9 +341,12 @@ def package(args):
         binary = build_dir / target_dir(goos, goarch) / executable(goos)
         files = [(executable(goos), binary.read_bytes(), 0o755), *common]
         if goos == "windows":
+            # The launcher updates itself from the release it installs.
+            files.insert(1, (LAUNCHER, (binary.parent / LAUNCHER).read_bytes(), 0o755))
             package_zip(out / f"nanolathe-{goos}-{goarch}.zip", files)
         else:
             package_tar(out / f"nanolathe-{goos}-{goarch}.tar.gz", files)
+    shutil.copyfile(build_dir / target_dir("windows", "amd64") / LAUNCHER, out / SETUP)
     shutil.copyfile(build_dir / "build.json", out / "build.json")
     sums = "".join(f"{sha256(out / name)}  {name}\n" for name in ASSETS if name != "SHA256SUMS")
     (out / "SHA256SUMS").write_text(sums)
