@@ -30,6 +30,7 @@ const English = "english"
 // own name for itself.
 var Languages = []struct{ Code, Name string }{
 	{English, "English"},
+	{"chinese", "简体中文"},
 	{"ukrainian", "Українська"},
 }
 

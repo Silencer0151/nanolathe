@@ -10,6 +10,7 @@ import (
 	"image/color"
 	"math"
 	"strings"
+	"unicode"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/nanolathe-gg/nanolathe/internal/film"
@@ -27,6 +28,10 @@ type fontGlyph struct {
 	left    float64
 	top     float64
 	advance float64
+	// units is how many face units one atlas pixel covers. The Latin faces
+	// store glyphs at the atlas resolution, so it is one; the CJK additions
+	// are rasterized smaller and carry their own scale (internal/film).
+	units float64
 }
 
 // Fonts are the two faces the screen sets: the condensed display face for
@@ -45,7 +50,11 @@ func LoadFonts() Fonts {
 func newFont(face *film.Typeface) *Font {
 	f := &Font{face: face, glyphs: make(map[rune]*fontGlyph, len(face.Glyphs))}
 	for r, g := range face.Glyphs {
-		fg := &fontGlyph{left: float64(g.Left), top: float64(g.Top), advance: g.Advance}
+		units := g.Scale
+		if units == 0 {
+			units = 1
+		}
+		fg := &fontGlyph{left: float64(g.Left), top: float64(g.Top), advance: g.Advance, units: units}
 		for _, level := range g.Levels {
 			fg.levels = append(fg.levels, coverageImage(level))
 		}
@@ -184,12 +193,14 @@ func (f *Font) run(dst *ebiten.Image, text string, x, y float64, s Style) {
 		img := g.levels[l]
 		levelScale := math.Pow(2, float64(l))
 		b := img.Bounds()
-		// Level images carry a two-texel border at level 0, halved per level.
-		border := 2 / levelScale
+		// Level images carry a two-texel border at level 0, halved per level,
+		// so a border texel spans units face units and half of them per level.
+		u := g.units
+		border := 2 * u / levelScale
 		gx := pen + (g.left-border)*scale
 		gy := y + (g.top-border)*scale
-		gw := float64(b.Dx()) * levelScale * scale
-		gh := float64(b.Dy()) * levelScale * scale
+		gw := float64(b.Dx()) * levelScale * scale * u
+		gh := float64(b.Dy()) * levelScale * scale * u
 		// Colour runs from the cap line to the baseline, independent of each
 		// glyph's own box, so a word shades as one piece.
 		capTop := y - s.Size
@@ -210,21 +221,101 @@ func (f *Font) Wrap(text string, s Style, width float64) []string {
 	}
 	var lines []string
 	for _, para := range strings.Split(text, "\n") {
-		words := strings.Fields(para)
-		line := ""
-		for _, w := range words {
-			try := w
-			if line != "" {
-				try = line + " " + w
-			}
-			if f.Measure(try, s) <= width || line == "" {
-				line = try
-				continue
-			}
+		lines = append(lines, f.wrapParagraph(para, s, width)...)
+	}
+	return lines
+}
+
+// wide reports whether a rune is set at full width, as Chinese and the other
+// East Asian scripts are.
+func wide(r rune) bool {
+	switch {
+	case r >= 0x1100 && r <= 0x115F,
+		r >= 0x2E80 && r <= 0x303E,
+		r >= 0x3041 && r <= 0x33FF,
+		r >= 0x3400 && r <= 0x4DBF,
+		r >= 0x4E00 && r <= 0x9FFF,
+		r >= 0xA000 && r <= 0xA4CF,
+		r >= 0xAC00 && r <= 0xD7A3,
+		r >= 0xF900 && r <= 0xFAFF,
+		r >= 0xFE30 && r <= 0xFE6F,
+		r >= 0xFF00 && r <= 0xFF60,
+		r >= 0xFFE0 && r <= 0xFFE6,
+		r >= 0x20000 && r <= 0x3FFFF:
+		return true
+	}
+	return false
+}
+
+// noBreakBefore reports the closing punctuation a line may not start with: a
+// Chinese line breaks between characters, but never before these.
+func noBreakBefore(r rune) bool {
+	return strings.ContainsRune("。，、；：？！）〕〉》」』】’”·…％", r)
+}
+
+// wrapParagraph breaks one paragraph. Latin words stay whole; a run of wide
+// characters may break between any two of them, which is how a Chinese line
+// fills its column when it has no spaces to break at.
+func (f *Font) wrapParagraph(para string, s Style, width float64) []string {
+	type token struct {
+		text  string
+		space bool // a space separated this token from the one before it
+	}
+	var tokens []token
+	pending := false
+	var word strings.Builder
+	flushWord := func() {
+		if word.Len() > 0 {
+			tokens = append(tokens, token{text: word.String(), space: pending})
+			word.Reset()
+			pending = false
+		}
+	}
+	for _, r := range para {
+		switch {
+		case unicode.IsSpace(r):
+			flushWord()
+			pending = true
+		case wide(r):
+			flushWord()
+			tokens = append(tokens, token{text: string(r), space: pending})
+			pending = false
+		default:
+			word.WriteRune(r)
+		}
+	}
+	flushWord()
+
+	var lines []string
+	line := ""
+	for i, t := range tokens {
+		joined := t.text
+		if line != "" && t.space {
+			joined = line + " " + t.text
+		} else if line != "" {
+			joined = line + t.text
+		}
+		fits := f.Measure(joined, s) <= width
+		if fits || line == "" {
+			line = joined
+			continue
+		}
+		// A closing mark never opens a line: pull the character before it
+		// along instead, as a Chinese column would.
+		if len([]rune(t.text)) == 1 && noBreakBefore([]rune(t.text)[0]) && i > 0 {
+			line += t.text
 			lines = append(lines, line)
-			line = w
+			line = ""
+			continue
 		}
 		lines = append(lines, line)
+		line = t.text
+	}
+	if line != "" {
+		lines = append(lines, line)
+	}
+	if len(lines) == 0 {
+		lines = append(lines, "")
 	}
 	return lines
 }

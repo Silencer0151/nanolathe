@@ -472,7 +472,7 @@ func parseFlags(args []string, out io.Writer) (Options, error) {
 	})
 	set.StringVar(&opts.Renderer, "renderer", settings.DefaultPresentation().Renderer, "start-up presentation renderer (omitted uses saved preference): \"classic\" (software) or \"modern\" (GPU); any other value is classic")
 	set.BoolVar(&opts.Fullscreen, "fullscreen", false, "desktop fullscreen (Alt+Enter toggles); omitted uses saved preference")
-	set.Func("language", "interface language for this run: english or ukrainian; omitted uses saved preference", func(text string) error {
+	set.Func("language", "interface language for this run: english, chinese or ukrainian; omitted uses saved preference", func(text string) error {
 		code, err := parseLanguage(text)
 		opts.Language = code
 		return err

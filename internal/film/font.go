@@ -20,7 +20,11 @@ type atlasGlyph struct {
 	X, Y, W, H int
 	Left, Top  int
 	Advance    float64
-	levels     []*image.Gray
+	// Scale is how many face units one atlas pixel covers; zero means one.
+	// tools/film-font-cjk writes it for glyphs it rasterizes below the atlas
+	// resolution the Latin faces use.
+	Scale  float64
+	levels []*image.Gray
 }
 
 type atlasFace struct {

@@ -1,0 +1,107 @@
+#!/usr/bin/env python3
+"""Append CJK glyphs to the film glyph atlases (docs/DESIGN_I18N.md).
+
+Barlow has no Chinese, so the characters the Chinese catalog draws come from
+Noto Sans SC. Hanzi are rasterized below the atlas resolution the Latin faces
+use and carry a `scale` factor (face units per atlas pixel), so the atlases
+stay a few megabytes while a character still sets at its proper size beside
+the Latin caps. Existing glyphs are kept byte for byte: this script only lays
+new rows below them, so it can run on its own output and only adds what the
+catalog needs.
+
+Usage:
+  tools/film-font-cjk /path/to/NotoSansSC.ttf internal/i18n/locales/chinese.json [...]
+Source revision, checksums and license: internal/film/assets/README.md.
+"""
+import hashlib
+import os
+import json
+from pathlib import Path
+import sys
+
+from PIL import Image, ImageDraw, ImageFont
+
+OUT = Path(__file__).resolve().parent.parent / "internal/film/assets"
+WIDTH = 2048
+# A hanzi reads as one piece beside a Latin cap when its ink is a little
+# taller than the cap height.
+HANZI_OVER_CAP = 1.2
+# Rasterized ink height in atlas pixels. The scale factor makes the size
+# independent of this; it only trades atlas memory against sharpness.
+INK_PX = 110
+WEIGHT = {"display": int(os.environ.get("FILM_CJK_WEIGHT_DISPLAY", "800")),
+          "body": int(os.environ.get("FILM_CJK_WEIGHT_BODY", "400"))}
+# Characters the screen sets outside a catalog: the language card's own name.
+EXTRA = "简体中文"
+
+
+def wanted(catalogs):
+    chars = set(EXTRA)
+    for path in catalogs:
+        for text in json.loads(Path(path).read_text(encoding="utf-8")).values():
+            chars.update(text)
+    return sorted(c for c in chars if ord(c) > 0x7F)
+
+
+def load_face(source, weight, size):
+    font = ImageFont.truetype(source, size)
+    try:
+        font.set_variation_by_axes([weight])
+    except Exception:
+        pass
+    return font
+
+
+def append(source, name, chars):
+    meta = json.loads((OUT / (name + ".json")).read_text())
+    atlas = Image.open(OUT / (name + ".png")).convert("L")
+    have = set(meta["glyphs"])
+    todo = [c for c in chars if c not in have]
+
+    probe = load_face(source, WEIGHT[name], 256)
+    ink = -probe.getbbox("国", anchor="ls")[1] + probe.getbbox("国", anchor="ls")[3]
+    em = max(16, round(256 * INK_PX / ink))
+    font = load_face(source, WEIGHT[name], em)
+    box = font.getbbox("国", anchor="ls")
+    ink = box[3] - box[1]
+    scale = HANZI_OVER_CAP * meta["cap"] / ink
+
+    rows, glyphs = [], {}
+    x = row_height = 0
+    y = atlas.height + 4
+    for char in todo:
+        left, top, right, bottom = font.getbbox(char, anchor="ls")
+        width, height = right - left, bottom - top
+        if width == 0 or height == 0:
+            continue
+        if x + width + 4 > WIDTH:
+            x, y, row_height = 0, y + row_height + 4, 0
+        rows.append((char, x - left, y - top))
+        glyphs[char] = dict(x=x, y=y, w=width, h=height,
+                            left=round(left * scale), top=round(top * scale),
+                            advance=font.getlength(char) * scale,
+                            scale=scale)
+        x += width + 4
+        row_height = max(row_height, height)
+    if not rows:
+        print(name, "already carries every character")
+        return
+
+    taller = Image.new("L", (WIDTH, y + row_height))
+    taller.paste(atlas, (0, 0))
+    draw = ImageDraw.Draw(taller)
+    for char, px, py in rows:
+        draw.text((px, py), char, font=font, fill=255, anchor="ls")
+    taller.save(OUT / (name + ".png"))
+    meta["glyphs"] = {**meta["glyphs"], **glyphs}
+    (OUT / (name + ".json")).write_text(
+        json.dumps(meta, separators=(",", ":"), ensure_ascii=False) + "\n")
+    print(name, "cjk source sha256:", hashlib.sha256(Path(source).read_bytes()).hexdigest(),
+          "em", em, "scale", round(scale, 3), "glyphs", len(glyphs), "atlas", taller.size)
+
+
+if len(sys.argv) < 3:
+    sys.exit(__doc__)
+chars = wanted(sys.argv[2:])
+append(sys.argv[1], "display", chars)
+append(sys.argv[1], "body", chars)

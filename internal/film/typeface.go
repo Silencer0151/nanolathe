@@ -14,6 +14,11 @@ type TypefaceGlyph struct {
 	Left, Top int
 	W, H      int
 	Advance   float64
+	// Scale is how many face units one atlas pixel covers, for a face whose
+	// glyphs are rasterized below the atlas resolution tools/film-font uses
+	// (the CJK additions, docs/DESIGN_I18N.md). Zero means one, the value
+	// every Latin glyph carries implicitly.
+	Scale float64
 }
 
 // Typeface is a read-only view of one bundled face for text drawn outside a
@@ -40,7 +45,7 @@ func FilmTypeface(name string) *Typeface {
 		if len(runes) != 1 {
 			continue
 		}
-		out.Glyphs[runes[0]] = TypefaceGlyph{Levels: g.levels, Left: g.Left, Top: g.Top, W: g.W, H: g.H, Advance: g.Advance}
+		out.Glyphs[runes[0]] = TypefaceGlyph{Levels: g.levels, Left: g.Left, Top: g.Top, W: g.W, H: g.H, Advance: g.Advance, Scale: g.Scale}
 	}
 	return out
 }

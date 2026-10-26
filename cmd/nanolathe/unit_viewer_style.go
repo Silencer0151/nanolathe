@@ -8,6 +8,7 @@ import (
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/nanolathe-gg/nanolathe/internal/film"
 	"github.com/nanolathe-gg/nanolathe/internal/gui"
+	"github.com/nanolathe-gg/nanolathe/internal/i18n"
 	"github.com/nanolathe-gg/nanolathe/internal/platform/screenkit"
 	"github.com/nanolathe-gg/nanolathe/vfs"
 
@@ -143,6 +144,11 @@ func (s *toolsScreen) label(dst *ebiten.Image, text string, r screenkit.Rect, st
 	if target == nil || text == "" {
 		return
 	}
+	// Translate before the fit, so the viewer measures the language it sets.
+	// The label then draws Verbatim: what unitViewerMeasure fitted is what
+	// reaches the font. Unit, weapon and description text has no catalog
+	// entry and passes through unchanged.
+	text = i18n.T(text)
 	text = unitViewerFitText(text, r.W, style, display)
 	font := s.fonts.Body
 	if display {
