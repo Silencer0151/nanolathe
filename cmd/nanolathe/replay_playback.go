@@ -154,6 +154,15 @@ func replayContent(cs *contentSet, h replay.Header, progress content.Progress) (
 	if len(plan.missing) > 0 {
 		return c, nil, &roomContentMissingError{missing: plan.missing}
 	}
+	if raw := config.Request().GeneratedMap; len(raw) != 0 {
+		// A room on a generated map: every seat made it on this content
+		// (DESIGN_MAP_GENERATOR §10).
+		made, err := roomGeneratedMap(cs, plan, raw)
+		if err != nil {
+			return c, nil, err
+		}
+		plan.generated = []*generatedMap{made}
+	}
 	mounted, view, err := roomContentFS(cs, plan)
 	if err != nil {
 		return c, nil, err

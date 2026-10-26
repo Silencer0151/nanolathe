@@ -1377,7 +1377,7 @@ records with typed validation and application through the existing owning
 | 17. Chosen starts | Per seat in slot order, a `bool` set, followed when set by X and Z as two `u32` world pixels below 2^20. At least one seat must choose; omit the record when every start is Auto. Only a skirmish's human or computer row may choose, under `SeatRules.ChosenStarts` (DESIGN_SESSIONS_AI_SAVE "Modern chosen start positions"). |
 | 18. Allied sight | One `u8`: 1 separate or 2 shared. Omit for the inherited default: online skirmish teams share, single-player teams do not. Survival always shares and carries no choice. `SeatRules.AlliedSightChoice` must permit the record (DESIGN_SESSIONS_AI_SAVE "Modern allied sight"). |
 | 19. Builder speed | One `u8`: the Builder speed step index 1..5 for ×2, ×3, ×5, ×8, ×20. Omit it for the identity; index 0 is refused. Field 11's eleven indices are frozen, so this mutator's own step list travels here; a typed request must agree with the record. Mutators apply in every mode, Strict 3.1 included, so no `RuleSet` answer gates it ([DESIGN_MODS_MUTATORS §6.7](DESIGN_MODS_MUTATORS.md)). |
-| 20. Generated map | The recipe of the generated map the battle is played on, as the host wrote it: at most 64 KiB, never empty; omit the record for any other map. It is no gameplay choice and changes nothing a tick computes, since the map's own files are the content identity's; it is what reproducing the battle needs. The configuration carries it as opaque bytes; the host playing the battle reads it, makes the map again when it is not mounted, and refuses rather than play another map of that name. Skirmish and Survival alike (DESIGN_MAP_GENERATOR §10). |
+| 20. Generated map | The recipe of the generated map the battle is played on, as the host wrote it: at most 64 KiB, never empty; omit the record for any other map. It is no gameplay choice and changes nothing a tick computes, since the map's own files are the content identity's; it is what reproducing the battle needs. The configuration carries it as opaque bytes; the host playing the battle reads it, makes the map again when it is not mounted, and refuses rather than play another map of that name. An online room on a generated map carries it in its base configuration, and every seat holds the map before Ready (§16.8). Skirmish and Survival alike (DESIGN_MAP_GENERATOR §10). |
 
 All four require flag bit 0, and an optional spelling is refused. Records
 17–19 also refuse a malformed payload, trailing payload bytes or an explicit
@@ -6527,6 +6527,12 @@ entry is one of:
    the room map's own package and the dependencies it declares. The host's
    other map packages are not part of the room.
 
+**A generated map** (DESIGN_MAP_GENERATOR §10) is not an entry: the base
+configuration carries its recipe as extension 20, and the room content
+names the archives the recipe's sources come from, listed as base archives
+even when they hold only maps. A saved generated map travels the same way,
+never as its package.
+
 The room's mod stays field 8. Loose files in the simulation directories —
 those the §8.7 families read — are never room content: they cannot be
 described or fetched, so no seat mounts them for an online battle, and the
@@ -6573,6 +6579,13 @@ arrives, it sorts every entry into one of four states:
   `ccmiss.ccx`), Battle Tactics (`btdata.ccx`, `btmaps.ccx`,
   `tactics1.hpi`–`tactics8.hpi`) — and by file name otherwise, keeps Ready
   disabled, and says the host can turn it off.
+
+The room's generated map, once nothing is missing, is held or made. The
+host holds the one it made; any other seat that does not hold it makes it
+from the recipe in the background on the room's content as the battle
+mounts it, checks the recipe's hashes and mounts it with its generated maps.
+The lobby says it is making the room's map, and Ready waits; a seat that
+cannot make it is told why and cannot be ready.
 
 A player joins even while content is missing, so they can ask the host in
 chat. The browser build, which has no package libraries, resolves every

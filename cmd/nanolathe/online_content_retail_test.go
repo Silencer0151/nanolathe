@@ -63,9 +63,10 @@ func roomInstallWithout(t *testing.T, retail string, left []string) string {
 // roomTwoInstalls opens a room through a real local relay with the host on
 // hostRoot and a guest on guestRoot, each with its own content, on Ashap
 // Plateau with the host's two Easy Modern computers, both humans on one team,
-// and readies both. It returns the two shells once both seats are ready or
-// the guest's lobby blocks Ready.
-func roomTwoInstalls(t *testing.T, hostRoot, guestRoot string) (host, guest *gameShell) {
+// and readies both. prepare may set the host up before it creates the room.
+// It returns the two shells once both seats are ready or the guest's lobby
+// blocks Ready.
+func roomTwoInstalls(t *testing.T, hostRoot, guestRoot string, prepare ...func(host *gameShell)) (host, guest *gameShell) {
 	t.Helper()
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
@@ -93,6 +94,9 @@ func roomTwoInstalls(t *testing.T, hostRoot, guestRoot string) (host, guest *gam
 		}
 	}
 	host.setup.Difficulty = 0
+	for _, f := range prepare {
+		f(host)
+	}
 	if err := host.openOnlineScreen(); err != nil {
 		t.Fatal(err)
 	}
@@ -121,6 +125,10 @@ func roomTwoInstalls(t *testing.T, hostRoot, guestRoot string) (host, guest *gam
 	}
 	awaitOnlineShells(t, "the room's latest settings", func() bool {
 		return guest.online.room.base.Digest() == host.online.room.base.Digest()
+	}, shells...)
+	// A room on a generated map: the guest makes it and mounts it first.
+	awaitOnlineShells(t, "the room's generated map", func() bool {
+		return guest.online.room.roomMap.job == nil && guest.online.room.contentCS == guest.cs
 	}, shells...)
 	if guest.onlineLobbyBlock() != "" {
 		return host, guest
