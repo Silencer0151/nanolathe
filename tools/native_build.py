@@ -1,14 +1,15 @@
 """Build and package Nanolathe's prebuilt native release executables.
 
-The build reproduces the source installers (tools/installer/install.sh and
-install.ps1) exactly, because online rooms admit only stamped builds and two
-players match only when their stamps do (docs/DESIGN_MULTIPLAYER.md §8.7):
-it downloads the Go release that https://nanolathe.gg/install/release.txt
-pins and verifies its archive hash, downloads the commit's archive from
-codeload, stamps it with stampgen using the installers' arguments and all
-six admitted toolchain hashes, and builds with the installers' flags. Go
-builds the same executable on any host, so one Linux job cross-compiles
-every target.
+The build reproduces the source installer (tools/installer/install.sh, which
+Mac and Linux players run) exactly, because online rooms admit only stamped
+builds and two players match only when their stamps do
+(docs/DESIGN_MULTIPLAYER.md §8.7): it downloads the Go release that
+https://nanolathe.gg/install/release.txt pins and verifies its archive hash,
+downloads the commit's archive from codeload, stamps it with stampgen using
+the installer's arguments and all six admitted toolchain hashes, and builds
+with the installer's flags. Go builds the same executable on any host, so one
+Linux job cross-compiles every target. Windows players install these
+executables through the launcher.
 
 After stamping, each Windows target gets a version resource and icon
 (internal/version/winresgen), which code signing requires. The resource is
