@@ -281,7 +281,8 @@ func (s *toolsScreen) drawSearch(dst *ebiten.Image, index int, r screenkit.Rect)
 	if focused && s.selectAll && text != "" {
 		screenkit.Fill(dst, s.deviceRect(screenkit.Rect{X: tr.X, Y: tr.Y - 2, W: math.Min(tr.W, float64(unitViewerTextWidth(text))), H: unitViewerTextMetric + 2}), color.RGBA{64, 109, 57, 130})
 	}
-	s.label(dst, text, tr, screenkit.Style{Size: unitViewerBodySize, Top: nlBody}, false)
+	// The query is the player's own typing: set it as typed (DESIGN_I18N).
+	s.label(dst, text, tr, screenkit.Style{Size: unitViewerBodySize, Top: nlBody, Verbatim: true}, false)
 	if focused && int(s.uiClock*2)%2 == 0 {
 		caret := min(len(text), max(0, s.panel.EditorCaret()))
 		x := tr.X + unitViewerMeasure(text[:caret], screenkit.Style{Size: unitViewerBodySize}, false)

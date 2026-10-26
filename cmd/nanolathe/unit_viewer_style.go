@@ -147,8 +147,11 @@ func (s *toolsScreen) label(dst *ebiten.Image, text string, r screenkit.Rect, st
 	// Translate before the fit, so the viewer measures the language it sets.
 	// The label then draws Verbatim: what unitViewerMeasure fitted is what
 	// reaches the font. Unit, weapon and description text has no catalog
-	// entry and passes through unchanged.
-	text = i18n.T(text)
+	// entry and passes through unchanged; text the player typed asks for
+	// Verbatim and is never translated.
+	if !style.Verbatim {
+		text = i18n.T(text)
+	}
 	text = unitViewerFitText(text, r.W, style, display)
 	font := s.fonts.Body
 	if display {
