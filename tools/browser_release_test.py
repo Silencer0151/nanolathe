@@ -1,6 +1,6 @@
 """Authored release listings for the browser publish plan; nothing calls gh."""
 import unittest
-from browser_release import ASSETS, complete, plan, run_number
+from browser_release import ASSETS, KINDS, complete, plan, run_number
 
 
 def release(tag, assets=ASSETS, draft=False, number=None):
@@ -45,6 +45,15 @@ class Plan(unittest.TestCase):
     def test_a_published_incomplete_release_of_this_run_is_an_error(self):
         with self.assertRaises(RuntimeError):
             plan([release("browser-10", assets=ASSETS[:2])], "browser-", 10, 3)
+
+    def test_native_and_browser_releases_never_prune_each_other(self):
+        native = KINDS["native"][1]
+        releases = [release("browser-8"), release("browser-9"), release("native-8", assets=native),
+                    release("native-9", assets=native)]
+        _, prune = plan(releases, "native-", 10, 2, native)
+        self.assertEqual([r["tag_name"] for r in prune], ["native-8"])
+        _, prune = plan(releases, "browser-", 10, 2)
+        self.assertEqual([r["tag_name"] for r in prune], ["browser-8"])
 
     def test_keep_counts_this_run(self):
         releases = [release("browser-1"), release("browser-2")]

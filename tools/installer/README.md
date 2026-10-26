@@ -201,3 +201,41 @@ desktop Start Menu launch before promoting the fix.
 
 The first install has a cold compiler/dependency cache, so measure its time
 separately from updates. No first-install duration is promised.
+
+## Prebuilt native builds
+
+CI also builds release executables, so a launcher can install a build
+instead of compiling one; the installers above do not use them yet.
+`tools/native-build` reproduces these installers' build exactly. It downloads
+the Go release that `/install/release.txt` pins and checks its hash, downloads
+the commit's codeload archive, stamps it with stampgen using the installers'
+build arguments and all six toolchain hashes, then cross-compiles Windows and
+Linux x64/ARM64 with `CGO_ENABLED=0`, `GOAMD64=v1` and `GOARM64=v8.0`. Its
+executables therefore carry the same build manifest as an installer build of
+the same commit, which online rooms require; `tools/native_build_test.py`
+fails if the installers' build arguments drift from it.
+
+After stamping, `internal/version/winresgen` gives each Windows executable a
+version resource (product name Nanolathe and a four-part file version) and
+the shortcut icon, as code signing requires. The resource is not part of the
+stamped source, so it leaves the stamp unchanged. A build numbers itself from
+the highest `vX.Y.Z` tag plus the workflow run number, for example
+`0.3.0.412`.
+
+`tools/native-package` writes `nanolathe-windows-{amd64,arm64}.zip` and
+`nanolathe-linux-{amd64,arm64}.tar.gz`. Each holds the executable,
+`source-revision` (which the game shows as its revision), `LICENSE` and
+`NOTICE.md`, alongside `build.json` (revision, version, build manifest digest)
+and `SHA256SUMS`. The **native** job runs on every push and pull request and
+keeps the unsigned Windows executables as their own artifact,
+`windows-{amd64,arm64}/nanolathe.exe`, for signing. **native-smoke** starts
+each packaged executable on its own platform and checks that it reports the
+stamp and revision recorded in `build.json`, and that the Windows version
+resource is present. On main, **native-publish** publishes the assets as an
+unsigned `native-<run number>` prerelease (the Latest channel), keeping the
+two newest, through the same release code as the browser build.
+
+To test unpushed changes locally, pass `--archive` a tar.gz of the tree whose
+one top directory is `nanolathe-<revision>/`, with `--revision` and
+`--version`. Builds that run on the host check their own stamp, so a Linux
+x64 or Windows x64 host verifies that target.
