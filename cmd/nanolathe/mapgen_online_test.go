@@ -11,6 +11,7 @@ import (
 
 	"github.com/nanolathe-gg/nanolathe/internal/content"
 	"github.com/nanolathe-gg/nanolathe/internal/mapgen"
+	"github.com/nanolathe-gg/nanolathe/internal/replay"
 	"github.com/nanolathe-gg/nanolathe/internal/session"
 	"github.com/nanolathe-gg/nanolathe/internal/ui"
 	"github.com/nanolathe-gg/nanolathe/vfs"
@@ -105,6 +106,69 @@ func TestRoomContentCarriesAGeneratedMap(t *testing.T) {
 	again, err := roomGeneratedMap(other, plan, g.cs.generatedRecipeRecord(name))
 	if err != nil || !bytes.Equal(again.tnt, made.tnt) {
 		t.Fatalf("the recorded room's map was not made again on its content: %v", err)
+	}
+}
+
+// A recorded room on a generated map, on an install that does not hold the
+// map: its content mount, which a playback and the load of a continued
+// online replay's save share, makes the map and serves it; and a battle
+// continued from that playback saves the recorded recipe, so the save loads
+// onto the map (DESIGN_MULTIPLAYER §10.1).
+func TestARecordedRoomKeepsItsGeneratedMap(t *testing.T) {
+	useOnlineSessionSeams(t, 2)
+	g, made := roomHost(t, mapgenRoomFixture(t))
+	name := made.recipe.Name
+	recipe := g.cs.generatedRecipeRecord(name)
+	archives, err := baseArchives(g.cs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := onlineRoomContent(g.cs, archives, nil, name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := mountContent(Options{}, []string{filepath.Dir(archives[0].path)}, modSelection{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer other.Close()
+	if len(other.generatedRecipeRecord(name)) != 0 {
+		t.Fatal("the other install holds the map")
+	}
+	for _, withRecipe := range []bool{false, true} {
+		var raw []byte
+		if withRecipe {
+			raw = recipe
+		}
+		mounted, view, err := mountRoomContent(other, entries, raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		data, err := view.ReadFileLimit("maps/"+name+".tnt", mapgenTNTLimit(other))
+		mounted.Close()
+		if served := err == nil && bytes.Equal(data, made.tnt); served != withRecipe {
+			t.Fatalf("with the recipe %v, the room's content serves the map: %v (%v)", withRecipe, served, err)
+		}
+	}
+
+	frozen := onlineCreationFrozen(g.cs, [2]uint32{1, 2}, content.Mutators{}, content.Restrictions{}, nil, entries)
+	frozen.room.GeneratedMap = recipe
+	base, err := onlineConfig(g.cs, onlineTestCatalog(), onlineSettings{mapName: name, location: 1, commanderDeath: 1}, onlinePlaceholderSeats(nil), frozen)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := session.EncodeMatchConfig(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	shell := &gameShell{cs: other}
+	shell.battle = &battleSession{sess: &session.Session{Skirmish: session.SkirmishConfig{MapName: name}}}
+	if len(shell.battleRecipe()) != 0 {
+		t.Fatal("a battle on a map this install does not hold has a recipe")
+	}
+	shell.battle.takeover = &replayTakeover{source: &replayPlayback{header: replay.Header{Config: encoded}}}
+	if got := shell.battleRecipe(); !bytes.Equal(got, recipe) {
+		t.Fatalf("the continued battle records %q, not the room's recipe", got)
 	}
 }
 
