@@ -284,7 +284,8 @@ rather than by convention:
 
 * **Only the platform adapter reaches Ebitengine.** `internal/platform/ebitenapp`,
   `internal/platform/gpurender`, `internal/platform/screenkit`,
-  `internal/audiobackend` and `cmd/nanolathe` are the only packages whose
+  `internal/audiobackend`, `cmd/nanolathe` and the launcher's window
+  (`cmd/nanolathe-launcher`) are the only packages whose
   import closure (including their test binaries) may contain the Ebitengine
   modules, purego among them. Every other package, and every other test, stands up with no
   window and no audio device.

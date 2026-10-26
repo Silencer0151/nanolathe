@@ -2129,7 +2129,10 @@ leaves the line empty (DESIGN_INTERFACE_HUD_INPUT §2.6).
 
 **Guards.** Architecture tests: only `internal/modfetch` and the multiplayer
 WebSocket transport in `internal/relay` import `net/http`; only `cmd/nanolathe`
-imports `internal/modfetch`; no simulation
+imports `internal/modfetch`. The game itself has no other network access
+(D5). Outside it, the separate launcher program's release download,
+`internal/launcher` (tools/installer/README.md "Windows launcher"), also
+imports `net/http`, and only `cmd/nanolathe-launcher` imports it. No simulation
 package imports either new package. `ApplyMutators` walks weapon damage
 through `DamageKeysSorted`, never by ranging a map ([INVARIANTS](INVARIANTS.md)
 I1). Everything used — `archive/zip`, `net/http`, `crypto/sha256` and, later,
