@@ -138,3 +138,43 @@ func TestModernBuildStanceMarkerKeepsRetryAndReadyReleasesIt(t *testing.T) {
 		t.Fatalf("ready stance left deadline %d, want the retry released", f.n.Deadline)
 	}
 }
+
+// A rule-set switch takes effect at the record's next visit and unwinds
+// nothing (DESIGN_GAMEPLAY_RULES §5). A retry deadline armed under Modern still
+// wakes the record once after a switch to Strict 3.1, which re-parks it on the
+// gate alone and arranges nothing. A record parked under Strict is not visited
+// until its script writes a port; under Modern that visit arms the retry.
+func TestBuildStanceRetryFollowsARuleSwitch(t *testing.T) {
+	t.Run("modern-to-strict", func(t *testing.T) {
+		f := newBuildStanceFixture(t, &ModernRules{})
+		f.pump(1000, 1000)
+		due := uint32(f.n.Deadline)
+		f.q.Binding().Rules = StrictRules{}
+		f.pump(1001, due+3*modernBuildStanceRetryTicks)
+		if f.dispatched != 2 || f.starts != 0 {
+			t.Fatalf("after the switch: %d dispatches, %d arrangements; want 2 and 0", f.dispatched, f.starts)
+		}
+		if f.n.DynamicGate != gateBuildStance || f.n.Deadline != -1 {
+			t.Fatalf("gate %#x deadline %d, want exactly 0x4 and no deadline [04 R-COB-06]", f.n.DynamicGate, f.n.Deadline)
+		}
+	})
+	t.Run("strict-to-modern", func(t *testing.T) {
+		f := newBuildStanceFixture(t, StrictRules{})
+		f.pump(1000, 1000)
+		f.q.Binding().Rules = &ModernRules{}
+		f.pump(1001, 2000)
+		if f.dispatched != 1 || f.starts != 0 {
+			t.Fatalf("silent script after the switch: %d dispatches, %d arrangements; want 1 and 0", f.dispatched, f.starts)
+		}
+		f.u.Pending |= units.PendingScriptTouched
+		f.pump(2001, 2001)
+		due := int32(2001 + modernBuildStanceRetryTicks)
+		if f.dispatched != 2 || f.n.Deadline != due || f.n.DynamicGate != gateBuildStance|gateDeadline {
+			t.Fatalf("marker wake: %d dispatches, gate %#x deadline %d; want 2, 0x5 and %d", f.dispatched, f.n.DynamicGate, f.n.Deadline, due)
+		}
+		f.pump(2002, uint32(due))
+		if f.dispatched != 3 || f.starts != 1 {
+			t.Fatalf("at the retry deadline: %d dispatches, %d arrangements; want 3 and 1", f.dispatched, f.starts)
+		}
+	})
+}

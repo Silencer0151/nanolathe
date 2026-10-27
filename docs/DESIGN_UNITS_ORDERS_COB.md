@@ -1494,13 +1494,19 @@ deadline, and the row's next phase arms its own.
 The interval is above every stock ground builder's ordinary close-then-open
 handshake measured on Great Divide patrols: ARMCK 275 ticks, CORCK 162, the
 construction vehicles 82–127, the advanced kbots 139 and CORACK 124, and the
-commanders, CORNECRO and ARMFARK under 100.
+commanders, CORNECRO and ARMFARK under 100. Those measurements cover stock
+content only. A mod or add-on script whose opening takes longer than 450 ticks,
+or whose `StartBuilding` is not idempotent, receives a redundant
+`StartBuilding` each interval until its stance rises; the policy accepts that.
 
 **Boundaries.** The policy adds no node field, checkpoint or save bytes; the
 deadline is the record's ordinary deadline word. It draws no randomness and
 debits no resource. The retried callback carries the record's existing
 StopBuilding-pending flag, so cleanup still emits one counterpart. A switch of
-rule set takes effect at the record's next visit. Aircraft keep their own
+rule set takes effect at the record's next visit and unwinds nothing: a retry
+deadline armed under Modern still wakes the record once under Strict 3.1, which
+re-parks it on the gate alone, and a record already parked under Strict gains
+the retry only at its next script-touched wake. Aircraft keep their own
 stance exception [04 R-ORD-02 §2]. Construction's ground `MobileBuild`
 readiness wait in `internal/construction` is outside this policy: its wake path
 carries construction's own interrupt bits, and no report or trace has shown a
@@ -1508,8 +1514,9 @@ mobile build losing its request yet.
 
 **Verification.** `internal/orders/build_stance_modern_test.go` locks the retry
 deadline, the re-arranged callback and the absence of draws under Modern, the
-deadline-free park under Strict and Community, the marker keeping the deadline
-and a ready stance releasing it. `inbuildstance_deadline_test.go` and
+deadline-free park under Strict and Community, the marker keeping the deadline,
+a ready stance releasing it, and a rule-set switch in each direction
+(`TestBuildStanceRetryFollowsARuleSwitch`). `inbuildstance_deadline_test.go` and
 `inbuildstance_wake_test.go` keep the Strict wait. In `internal/session`,
 `TestModernPatrolBuildStanceRetryUnparksReclaimRetail` drives six CORACKs on
 Great Divide's forest patrols. Every stance wait ends within the bound and

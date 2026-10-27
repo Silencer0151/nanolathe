@@ -8,6 +8,11 @@ package orders
 // and the record would otherwise have parked forever. The producer now exists
 // (the COB engine-write opcode, via units.Unit.raiseScriptTouched), so the
 // stand-in is gone and this test is what keeps it gone.
+//
+// Both tests run without a bound rule set, so they lock the Strict 3.1 wait.
+// The Modern retry deadline a rule set may add beside the gate is locked in
+// build_stance_modern_test.go (DESIGN_UNITS_ORDERS_COB "Modern build-stance
+// retry").
 
 import (
 	"testing"
