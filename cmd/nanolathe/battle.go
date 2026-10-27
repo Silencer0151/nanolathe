@@ -1198,6 +1198,14 @@ func (b *battleSession) viewerStep(delta float64, cl *client.Client) {
 	if b == nil || cl == nil {
 		return
 	}
+	// Modals may consume input without pausing an online battle. Service
+	// assistance on those paths too, but never read while an async batch runs.
+	// The ordinary controller services it before launching its next batch.
+	defer func() {
+		if b.sim == nil || b.sim.pending == nil {
+			b.serviceSmartMakers()
+		}
+	}()
 	b.radialPointerOwned = false
 	b.pumpLocalMultiplayer(cl)
 	b.pumpReplayPlayback(cl)

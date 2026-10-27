@@ -40,11 +40,24 @@ submission, identity validation, script, billing and replay-recording paths as
 a manual click. No simulation rule, catalog mark, manifest, checkpoint, save
 or online extension is added. Replays reproduce those recorded commands; the
 assistant is read-only during playback and never generates extra commands.
-Online, only the owning client's host sends them. Work is bounded to 16 switches
-per observed settlement to leave room for human commands in a relay grant;
-larger fleets continue on subsequent settlements rather than flooding the
-transport. A stalled or paused frame never repeats a settlement's commands.
+Online, only the owning client's host sends them, with **one outstanding Smart
+command per client**. The next waits until the transport reports the submitted
+client sequence in an applied grant (not merely a newer world tick or a global
+stream position). Thus ten synchronized human clients contribute at most ten
+entries to the room-wide 64-entry pending queue, leaving space for human input,
+even if grants stall. Remaining decisions keep their observed budget and order,
+but are revalidated by allocation identity before submission; a newer settlement
+replaces the remainder. Offline, the full plan is submitted together. Paused
+frames never repeat a settlement's commands. Non-pausing menus do not stop Smart.
 
+Locally requested Upkeep/Generation pauses suppress new ON requests until their
+authoritative echo or rejection, without changing the committed frame. If an
+already in-flight Smart ON visits after that pause, Smart sends an ordinary OFF
+for that same allocation only after both the original command and pause have
+been applied. A successful manual activation submission retires Smart's pending
+correction and remaining plan for that allocation, without releasing its
+outstanding transport credit early. Smart does not shut down unrelated
+structures or reinterpret manual activation as its own.
 An Upkeep hold suppresses the assistant; a Generation hold prevents switching
 on but still permits shedding. Manual switching lasts until a later Smart
 decision, unless Smart is disabled. Full metal storage is not an exclusion,

@@ -211,6 +211,7 @@ func TestSmartMakerServiceOrdinaryCommandsOncePerSettlement(t *testing.T) {
 	}
 	// Later settlement permits another decision, not a per-host-frame loop.
 	f.Economy[0].ActivityTick = 60
+	f.Tick++ // the prior command has crossed the offline input boundary
 	b.serviceSmartMakers()
 	if len(b.sess.PendingHumanCommands()) != 2 {
 		t.Fatal("new settlement was not observed")
@@ -250,7 +251,7 @@ func TestSmartMakerServiceOrdinaryCommandsOncePerSettlement(t *testing.T) {
 	}
 }
 
-func TestSmartMakerServiceBoundsLargeFleet(t *testing.T) {
+func TestSmartMakerServiceCompletesOfflineFleetOnce(t *testing.T) {
 	b, cl := economyPanelFixture(t)
 	b.cl = cl
 	b.sess.Gameplay = gameplay.Modern
@@ -269,8 +270,8 @@ func TestSmartMakerServiceBoundsLargeFleet(t *testing.T) {
 	f.Economy = []frame.EconomyView{{Player: 0, Active: true, Energy: 1000, EnergyCapacity: 1000, ActivityTick: 30}}
 	b.serviceSmartMakers()
 	b.serviceSmartMakers()
-	if n := len(b.sess.PendingHumanCommands()); n != 16 {
-		t.Fatalf("unbounded relay burst: %d", n)
+	if n := len(b.sess.PendingHumanCommands()); n != 100 {
+		t.Fatalf("offline plan was truncated or repeated: %d", n)
 	}
 }
 

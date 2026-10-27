@@ -90,7 +90,12 @@ func (b *battleSession) DispatchStockpileGadget(count int) error {
 // every other command's selection-derived units are resolved from that state
 // here, at submission (submitHumanCommand, DESIGN_MULTIPLAYER §7.3).
 func (b *battleSession) enqueueHumanCommand(c session.HumanCommand) error {
-	_, err := b.submitHumanCommand(c)
+	sequence, err := b.submitHumanCommand(c)
+	if err == nil && c.Kind == session.HumanEconomyActivity {
+		b.noteSmartMakerHold(c.EconomyActivity, sequence)
+	} else if err == nil && c.Kind == session.HumanActivation {
+		b.noteSmartMakerManualActivation(c.Activation.Unit)
+	}
 	return err
 }
 

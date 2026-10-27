@@ -27,6 +27,12 @@ type smartMakersState struct {
 	enabled     bool
 	observed    bool
 	lastPass    uint32
+	plan        []smartMakerAction
+	pending     []smartMakerAction
+	overridden  []pool.UnitRef // manual activation retires provenance, not transport credit
+	sequence    uint64
+	sentTick    uint32
+	holds       [2]smartMakerHoldIntent
 }
 
 func (b *battleSession) smartMakersEnabled() bool {
@@ -139,6 +145,51 @@ func smartMakerPlan(f *frame.Frame, cat *content.Catalog, e frame.EconomyView) [
 	return plan
 }
 
+func (b *battleSession) noteSmartMakerManualActivation(unit pool.Handle) {
+	s := &b.smartMakers
+	// An explicit human switch owns this allocation from now on. Keep the
+	// outstanding command's credit until its grant, but retire its provenance.
+	for _, a := range s.pending {
+		if a.unit.Handle == unit && !slices.Contains(s.overridden, a.unit) {
+			s.overridden = append(s.overridden, a.unit)
+		}
+	}
+	s.plan = slices.DeleteFunc(s.plan, func(a smartMakerAction) bool { return a.unit.Handle == unit })
+}
+
+type smartMakerHoldIntent struct {
+	active, pause bool
+	sequence      uint64
+	tick          uint32
+}
+
+func (b *battleSession) noteSmartMakerHold(c session.HumanEconomyActivityCommand, sequence uint64) {
+	index := 0
+	if c.Activity == economy.ActivityGeneration {
+		index = 1
+	} else if c.Activity != economy.ActivityUpkeep {
+		return
+	}
+	f, ok := b.currentSnapshot()
+	if ok {
+		b.smartMakers.holds[index] = smartMakerHoldIntent{true, c.Pause, sequence, f.Tick}
+	}
+}
+
+func (b *battleSession) smartMakerCommandObserved(sequence uint64, tick uint32, f *frame.Frame) bool {
+	if b.multiplayer != nil {
+		// A room's stream positions and a client's submission sequences are
+		// different. The driver exposes only the latter's applied watermark.
+		ack, ok := b.multiplayer.driver.(interface{ AppliedLocalSequence() uint64 })
+		return ok && sequence <= ack.AppliedLocalSequence()
+	}
+	return f.Tick > tick
+}
+
+func (b *battleSession) smartMakerHoldPending(index int) bool {
+	h := b.smartMakers.holds[index]
+	return h.active && h.pause
+}
 func (b *battleSession) serviceSmartMakers() {
 	if b == nil || b.cl == nil || !b.cl.Enhanced() || !b.smartMakersEnabled() {
 		return
@@ -147,27 +198,69 @@ func (b *battleSession) serviceSmartMakers() {
 	if !ok || !b.smartMakersCanControl(f) || b.sess.Clock == nil || b.sess.Clock.Paused {
 		return
 	}
+	s := &b.smartMakers
+	for i := range s.holds {
+		h := &s.holds[i]
+		if h.active && b.smartMakerCommandObserved(h.sequence, h.tick, f) {
+			h.active = false
+		}
+	}
+	upkeepHeld := smartMakerHeld(f, economy.ActivityUpkeep) || b.smartMakerHoldPending(0)
+	generationHeld := smartMakerHeld(f, economy.ActivityGeneration) || b.smartMakerHoldPending(1)
+	var corrections []smartMakerAction
+	if len(s.pending) != 0 {
+		if !b.smartMakerCommandObserved(s.sequence, s.sentTick, f) || b.smartMakerHoldPending(0) || b.smartMakerHoldPending(1) {
+			return
+		}
+		// A previously submitted ON can reach its order visit after an
+		// Upkeep/Generation pause. Undo only our own in-flight ON intent,
+		// not a manual activation or an unrelated switchable structure.
+		if upkeepHeld || generationHeld {
+			for _, a := range s.pending {
+				if a.on && !slices.Contains(s.overridden, a.unit) {
+					corrections = append(corrections, smartMakerAction{a.unit, false})
+				}
+			}
+		}
+		s.pending = nil
+		s.overridden = nil
+	}
 	for _, e := range f.Economy {
 		if e.Player != f.ViewingPlayer || !e.Active || e.ActivityTick == 0 {
 			continue
 		}
-		s := &b.smartMakers
-		if s.observed && s.lastPass == e.ActivityTick {
+		if !s.observed || s.lastPass != e.ActivityTick {
+			s.observed, s.lastPass = true, e.ActivityTick
+			s.plan = smartMakerPlan(f, b.cat, e)
+		}
+		break
+	}
+	if upkeepHeld {
+		s.plan = nil
+	}
+	s.plan = append(corrections, s.plan...)
+	for len(s.plan) > 0 {
+		a := s.plan[0]
+		s.plan = s.plan[1:]
+		u, exists := snapshotUnitByHandle(f, a.unit.Handle)
+		if !exists || unitViewRef(u) != a.unit || u.Owner != f.ViewingPlayer ||
+			u.BuildRemaining != 0 || u.Activated == a.on || a.on && (upkeepHeld || generationHeld) {
+			continue
+		}
+		sequence, err := b.submitHumanCommand(session.HumanCommand{Kind: session.HumanActivation,
+			Activation: session.HumanActivationCommand{Unit: a.unit.Handle, Activate: a.on}})
+		if err != nil {
+			b.economyPanel.message = "Smart makers command could not be sent."
+			s.plan = nil
 			return
 		}
-		s.observed, s.lastPass = true, e.ActivityTick
-		// Bound automation to 16 commands per settlement (normally one second),
-		// leaving room for clicks in the relay's 64-command pending grant.
-		// Larger fleets converge over subsequent settlements, not host frames.
-		for i, a := range smartMakerPlan(f, b.cat, e) {
-			if i == 16 {
-				break
-			}
-			if err := b.DispatchActivation(session.HumanActivationCommand{Unit: a.unit.Handle, Activate: a.on}); err != nil {
-				b.economyPanel.message = "Smart makers command could not be sent."
-				return
-			}
+		s.pending = append(s.pending, a)
+		s.sequence, s.sentTick = sequence, f.Tick
+		if b.multiplayer != nil {
+			// One outstanding Smart command per client bounds ten synchronized
+			// humans to ten entries in the room-wide 64-entry pending grant,
+			// even if grants stall. No optimistic activation or timer retry.
+			return
 		}
-		return
 	}
 }
