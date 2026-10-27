@@ -63,7 +63,15 @@ const (
 )
 
 // call invokes a COM method by vtable slot and returns its HRESULT as an
-// error.
+// error. A Go pointer passed as a uintptr is only an integer to the garbage
+// collector: the buffer behind it could be freed, or moved with a growing
+// stack, before Windows reads or writes it. go:uintptrescapes, as on
+// windows.LazyProc.Call, keeps every pointer converted with
+// uintptr(unsafe.Pointer(p)) directly in a call's argument list on the
+// heap and alive until call returns, so callers convert there and nowhere
+// else.
+//
+//go:uintptrescapes
 func call(obj unsafe.Pointer, slot int, args ...uintptr) error {
 	vtbl := *(*unsafe.Pointer)(obj)
 	method := *(*uintptr)(unsafe.Add(vtbl, uintptr(slot)*unsafe.Sizeof(uintptr(0))))
@@ -111,12 +119,11 @@ func queryInterface(obj unsafe.Pointer, iid *windows.GUID) (unsafe.Pointer, erro
 	return out, err
 }
 
-func utf16(s string) uintptr {
-	p, err := windows.UTF16PtrFromString(s)
-	if err != nil {
-		return 0
-	}
-	return uintptr(unsafe.Pointer(p))
+// utf16 converts s for a Windows call, or gives nil when s holds a NUL.
+// Pass it as uintptr(unsafe.Pointer(p)) only in a call's argument list.
+func utf16(s string) *uint16 {
+	p, _ := windows.UTF16PtrFromString(s)
+	return p
 }
 
 // SaveShortcut writes a .lnk that starts target in workdir with target's
@@ -129,18 +136,18 @@ func SaveShortcut(path, target, workdir string) error {
 			return err
 		}
 		defer release(link)
-		for _, step := range []struct {
-			slot int
-			args []uintptr
-		}{
-			{shellLinkSetPath, []uintptr{utf16(target)}},
-			{shellLinkSetWorkingDirectory, []uintptr{utf16(workdir)}},
-			{shellLinkSetDescription, []uintptr{utf16(shortcutDescription)}},
-			{shellLinkSetIconLocation, []uintptr{utf16(target), 0}},
-		} {
-			if err := call(link, step.slot, step.args...); err != nil {
-				return err
-			}
+		target16, workdir16, description16 := utf16(target), utf16(workdir), utf16(shortcutDescription)
+		if err := call(link, shellLinkSetPath, uintptr(unsafe.Pointer(target16))); err != nil {
+			return err
+		}
+		if err := call(link, shellLinkSetWorkingDirectory, uintptr(unsafe.Pointer(workdir16))); err != nil {
+			return err
+		}
+		if err := call(link, shellLinkSetDescription, uintptr(unsafe.Pointer(description16))); err != nil {
+			return err
+		}
+		if err := call(link, shellLinkSetIconLocation, uintptr(unsafe.Pointer(target16)), 0); err != nil {
+			return err
 		}
 		file, err := queryInterface(link, &iidPersistFile)
 		if err != nil {
@@ -150,7 +157,7 @@ func SaveShortcut(path, target, workdir string) error {
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			return err
 		}
-		return call(file, persistFileSave, utf16(path), 1)
+		return call(file, persistFileSave, uintptr(unsafe.Pointer(utf16(path))), 1)
 	})
 }
 
@@ -168,7 +175,7 @@ func ShortcutTarget(path string) (string, error) {
 			return err
 		}
 		defer release(file)
-		if err := call(file, persistFileLoad, utf16(path), 0); err != nil {
+		if err := call(file, persistFileLoad, uintptr(unsafe.Pointer(utf16(path))), 0); err != nil {
 			return err
 		}
 		buf := make([]uint16, windows.MAX_LONG_PATH)
@@ -283,10 +290,10 @@ func PickFolder(owner uintptr, title, start string) (folder string, ok bool, err
 		if err := call(dialog, fileDialogSetOptions, fosPickFolders|fosForceFileSystem); err != nil {
 			return err
 		}
-		_ = call(dialog, fileDialogSetTitle, utf16(title))
+		_ = call(dialog, fileDialogSetTitle, uintptr(unsafe.Pointer(utf16(title))))
 		if info, statErr := os.Stat(start); statErr == nil && info.IsDir() {
 			var item unsafe.Pointer
-			hr, _, _ := procSHCreateItemFromParsingName.Call(utf16(start), 0, uintptr(unsafe.Pointer(&iidShellItem)), uintptr(unsafe.Pointer(&item)))
+			hr, _, _ := procSHCreateItemFromParsingName.Call(uintptr(unsafe.Pointer(utf16(start))), 0, uintptr(unsafe.Pointer(&iidShellItem)), uintptr(unsafe.Pointer(&item)))
 			if int32(hr) >= 0 {
 				_ = call(dialog, fileDialogSetFolder, uintptr(item))
 				release(item)
