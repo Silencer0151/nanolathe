@@ -15,6 +15,43 @@ tick, and the citation routing that names this document as the home of
 `[P0-I14]` — picking, selection and HUD commands — and, jointly with
 DESIGN_PRESENTATION_CLIENT, of `[F-P1-008]`, defined in §3.5 below.
 
+## Smart makers input assistance
+
+The Enhanced energy dropdown offers **Smart: On/Off** beside Upkeep. It is
+local input assistance in every gameplay mode, on by default in Modern and off
+by default otherwise. It is independent of Modern's activity-hold controls.
+The selection lasts for this battle, not in settings, saves or online match
+configuration. Closing the dropdown, changing the viewed player, or opening a
+menu does not change it. Original presentation does not run this assistance.
+
+The host reads only committed frames and immutable unit definitions. Once per
+new observed settlement of its own human player, it uses whole-energy integer
+arithmetic to turn makers on at or above 80% storage and off below 40%. The
+40–80% band makes no changes. On-budget is the pass surplus plus stock above
+80%; off-need is the pass shortfall plus the gap up to 40%. Most-efficient
+makers (authored metal made per energy used) come on first; least-efficient
+come off first, with allocation order breaking ties. Candidates are completed,
+switchable buildings with nonzero makesmetal, positive energyuse and no
+extractsmetal. Computer players, other players and observers are never managed.
+No energy storage or non-finite economy reports produce no commands.
+
+Every switch is an ordinary per-unit activation command, taking the same
+submission, identity validation, script, billing and replay-recording paths as
+a manual click. No simulation rule, catalog mark, manifest, checkpoint, save
+or online extension is added. Replays reproduce those recorded commands; the
+assistant is read-only during playback and never generates extra commands.
+Online, only the owning client's host sends them. Work is bounded to 16 switches
+per observed settlement to leave room for human commands in a relay grant;
+larger fleets continue on subsequent settlements rather than flooding the
+transport. A stalled or paused frame never repeats a settlement's commands.
+
+An Upkeep hold suppresses the assistant; a Generation hold prevents switching
+on but still permits shedding. Manual switching lasts until a later Smart
+decision, unless Smart is disabled. Full metal storage is not an exclusion,
+matching the original controller's energy-only decision. Tests cover budgets,
+hysteresis boundaries, efficiency, exclusions, input capture/scaling, ordinary
+command dispatch, per-settlement deduplication and retail-battle captures.
+
 ## Modern economy breakdown
 
 The Enhanced presentation's metal and energy readout areas open an anchored

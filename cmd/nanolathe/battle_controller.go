@@ -194,6 +194,7 @@ func (c *BattleController) Step(frame BattleInputFrame, cl *client.Client) {
 	c.battle.deferFollowInput = true
 	c.battle.handleInput(state, cl)
 	c.battle.deferFollowInput = false
+	c.battle.serviceSmartMakers()
 	defer func() {
 		if pending := c.battle.pendingFollowInput; pending != nil {
 			c.battle.pendingFollowInput = nil

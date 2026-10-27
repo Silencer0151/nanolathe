@@ -275,6 +275,7 @@ type battleSession struct {
 	modernDrag            *battleCommandDrag     // modern command capture; DESIGN_INTERFACE_HUD_INPUT §3.11
 	resourceClick         *resourceClick         // modern resource gesture receipt; DESIGN_INTERFACE_HUD_INPUT §3.10
 	economyPanel          economyPanelState      // Enhanced resource explanation and pointer capture
+	smartMakers           smartMakersState       // local input assistance; never serialized
 	// gammaSetting retains the direct battle's write-all value independently
 	// of the command's immediate display factor [07 R-CAM-01 §6].
 	gammaSetting int

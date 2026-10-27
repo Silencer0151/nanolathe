@@ -31,7 +31,7 @@ type economyPanelState struct {
 }
 
 type economyPanelHit struct {
-	kind     uint8 // 1 resource, 2 close, 3 navigate, 4 pause, 5 background
+	kind     uint8 // 1 resource, 2 close, 3 navigate, 4 pause, 5 background, 6 Smart makers
 	resource economy.Res
 	activity economy.Activity
 	held     bool // retain the intent of the control that was pressed
@@ -204,6 +204,11 @@ func (h *retailBattleHUD) economyResourceRect(resource economy.Res) image.Rectan
 
 const economyPanelRowHeight = 31
 
+// Smart is independent of activity holds, available in every gameplay mode.
+func economySmartRect(row image.Rectangle) image.Rectangle {
+	return image.Rect(row.Max.X-206, row.Min.Y, row.Max.X-132, row.Min.Y+16)
+}
+
 func economyPanelControlRect(row image.Rectangle) image.Rectangle {
 	return image.Rect(row.Min.X, row.Min.Y+2, row.Min.X+28, row.Max.Y-2)
 }
@@ -290,6 +295,9 @@ func (b *battleSession) economyPanelHit(f *frame.Frame, x, y int32) economyPanel
 	for i, row := range economyReport(f, b.economyPanel.resource).rows {
 		r := economyPanelRowRect(panel, i)
 		if p.In(r) {
+			if b.economyPanel.resource == economy.Energy && row.activity == economy.ActivityUpkeep && p.In(economySmartRect(r)) {
+				return economyPanelHit{kind: 6, held: b.smartMakersEnabled()}
+			}
 			kind := uint8(3)
 			if p.In(economyPanelControlRect(r)) {
 				kind = 4
@@ -361,6 +369,13 @@ func (b *battleSession) activateEconomyPanel(f *frame.Frame, hit economyPanelHit
 		b.resourceQueueFeedback = nil
 	case 2:
 		state.open = false
+	case 6:
+		if state.resource == economy.Energy && b.smartMakersCanControl(f) {
+			b.smartMakersEnabled()
+			b.smartMakers.enabled = !hit.held
+			b.smartMakers.observed = false
+			state.message = ""
+		}
 	case 3, 4:
 		for _, row := range economyReport(f, state.resource).rows {
 			if row.activity != hit.activity {
@@ -473,7 +488,22 @@ func (h *retailBattleHUD) drawEconomyPanel(c *client.Client, b *battleSession, f
 		if row.held {
 			label += " [paused]"
 		}
-		text(label, contentX, r.Min.Y, max(0, barWidth-128), ink)
+		labelWidth := barWidth - 128
+		if b.economyPanel.resource == economy.Energy && row.activity == economy.ActivityUpkeep {
+			button := economySmartRect(r)
+			labelWidth = button.Min.X - contentX - 4
+			buttonInk, caption := muted, "Smart: --"
+			if b.smartMakersCanControl(f) {
+				buttonInk, caption = ink, "Smart: Off"
+				if b.smartMakersEnabled() {
+					buttonInk, caption = good, "Smart: On"
+				}
+			}
+			c.UIFillRect(button.Min.X, button.Min.Y, button.Dx(), button.Dy(), buttonInk)
+			c.UIFillRect(button.Min.X+1, button.Min.Y+1, button.Dx()-2, button.Dy()-2, bg)
+			text(caption, button.Min.X+3, button.Min.Y+3, button.Dx()-6, buttonInk)
+		}
+		text(label, contentX, r.Min.Y, max(0, labelWidth), ink)
 		amount := fmt.Sprintf("%.1f  %3.0f%%", row.amount, row.share*100)
 		text(amount, r.Max.X-128, r.Min.Y, 128, color)
 		detail := "No current contributors"
