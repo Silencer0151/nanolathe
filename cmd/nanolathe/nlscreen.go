@@ -620,7 +620,13 @@ func (s *nlScreen) applyDraft(g *gameShell, draft nlDraft, touched map[string]bo
 		g.fullscreen = next.fullscreen
 		ebiten.SetFullscreen(next.fullscreen)
 	}
+	wasLanguage := i18n.Language()
 	g.chooseLanguage(next.language)
+	if i18n.Language() != wasLanguage {
+		// A language may bring glyphs of its own (the Chinese atlases are
+		// decoded on selection), so the faces are rebuilt after the switch.
+		s.fonts = screenkit.LoadFonts()
+	}
 	g.display.Width, g.display.Height = next.resolution.W, next.resolution.H
 	g.commitWindowSize()
 	g.saveSettings()

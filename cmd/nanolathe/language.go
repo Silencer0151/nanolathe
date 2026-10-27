@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/hajimehoshi/ebiten/v2"
+	"github.com/nanolathe-gg/nanolathe/internal/film"
 	"github.com/nanolathe-gg/nanolathe/internal/i18n"
 	"github.com/nanolathe-gg/nanolathe/internal/platform/screenkit"
 )
@@ -37,6 +38,11 @@ func (g *gameShell) applyLanguage() {
 	}
 	if err := i18n.SetLanguage(code); err != nil {
 		fmt.Fprintf(os.Stderr, "nanolathe: %v (using English)\n", err)
+	}
+	if i18n.Language() == "chinese" {
+		// The Chinese glyphs live in their own atlases; they are decoded only
+		// when a language that needs them is selected.
+		film.EnableCJK()
 	}
 }
 
@@ -70,12 +76,21 @@ func languageIndex() int {
 // running language still finds theirs.
 func (s *nlScreen) languageCard() nlCard {
 	steps := make([]string, len(i18n.Languages))
+	subs := []string{"The interface as written", "Інтерфейс українською", "简体中文界面"}
 	for i, l := range i18n.Languages {
 		steps[i] = l.Name
+		if l.Code == "chinese" && !film.CJKEnabled() {
+			// The Chinese name is written in Chinese so a player who cannot
+			// read the running language still finds it, but those glyphs live
+			// in the atlases only Chinese decodes. Until then the card spells
+			// it in Latin, which the base faces always carry.
+			steps[i] = "Chinese"
+			subs[i] = "Chinese interface"
+		}
 	}
 	return nlCard{
 		key: "language", label: "Language", pics: []string{"armcom", "corcom"}, kind: nlHalves,
-		steps: steps, subs: []string{"The interface as written", "Інтерфейс українською", "简体中文界面"},
+		steps: steps, subs: subs,
 		get: func(d *nlDraft) int { return d.language },
 		set: func(d *nlDraft, v int) { d.language = v },
 		desc: func(*nlDraft, int) string {

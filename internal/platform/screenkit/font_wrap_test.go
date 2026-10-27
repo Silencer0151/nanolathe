@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"unicode"
+
+	"github.com/nanolathe-gg/nanolathe/internal/film"
 )
 
 // Latin text breaks only at its spaces, so a " · " separator at the margin
@@ -49,7 +51,6 @@ func TestWrapBindsChinesePunctuation(t *testing.T) {
 // without regenerating the atlases (tools/film-font-cjk) would otherwise set
 // the missing characters as spaces.
 func TestEveryCatalogCharacterHasAGlyph(t *testing.T) {
-	fonts := LoadFonts()
 	paths, err := filepath.Glob(filepath.Join("..", "..", "i18n", "locales", "*.json"))
 	if err != nil || len(paths) == 0 {
 		t.Fatalf("catalogs: %v %v", paths, err)
@@ -63,6 +64,13 @@ func TestEveryCatalogCharacterHasAGlyph(t *testing.T) {
 		if err := json.Unmarshal(data, &catalog); err != nil {
 			t.Fatalf("%s: %v", path, err)
 		}
+		// A language may carry its glyphs in its own atlas, loaded only when
+		// that language is selected; the faces must hold them by the time its
+		// catalog is checked.
+		if strings.HasPrefix(filepath.Base(path), "chinese") {
+			film.EnableCJK()
+		}
+		fonts := LoadFonts()
 		for _, text := range catalog {
 			for _, r := range text {
 				if unicode.IsSpace(r) {

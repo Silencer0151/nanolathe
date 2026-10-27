@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
-"""Append CJK glyphs to the film glyph atlases (docs/DESIGN_I18N.md).
+"""Write the CJK glyph atlases the Chinese interface draws (docs/DESIGN_I18N.md).
 
 Barlow has no Chinese, so the characters the Chinese catalog draws come from
-Noto Sans SC. Hanzi are rasterized below the atlas resolution the Latin faces
-use and carry a `scale` factor (face units per atlas pixel), so the atlases
-stay a few megabytes while a character still sets at its proper size beside
-the Latin caps. Existing glyphs are kept byte for byte: this script only lays
-new rows below them, so it can run on its own output and only adds what the
-catalog needs.
+Noto Sans SC. They go into their own `display-cjk` / `body-cjk` pair rather
+than into the shared film atlases: every player, in every language, loads the
+shared pair, while these are read only when a language needs them.
+
+Hanzi are rasterized below the atlas resolution the Latin faces use and carry
+a `scale` factor (face units per atlas pixel), so the pair stays a couple of
+megabytes while a character still sets at its proper size beside the Latin
+caps. The shared atlases are never written: this script only produces the pair,
+so a rerun from the same font and the same catalog produces the same files.
 
 Usage:
   tools/film-font-cjk /path/to/NotoSansSC.ttf internal/i18n/locales/chinese.json [...]
@@ -33,7 +36,7 @@ INK_PX = 110
 WEIGHT = {"display": int(os.environ.get("FILM_CJK_WEIGHT_DISPLAY", "800")),
           "body": int(os.environ.get("FILM_CJK_WEIGHT_BODY", "400"))}
 # Characters the screen sets outside a catalog: the language card's own name
-# and description.
+# and its caption.
 EXTRA = "简体中文界面"
 
 
@@ -57,24 +60,22 @@ def load_face(source, weight, size):
     return font
 
 
-def append(source, name, chars):
-    meta = json.loads((OUT / (name + ".json")).read_text())
-    atlas = Image.open(OUT / (name + ".png")).convert("L")
-    have = set(meta["glyphs"])
-    todo = [c for c in chars if c not in have]
+def build(source, name, chars):
+    # The base face supplies the cap height the additions are scaled against;
+    # its glyphs and pixels are read, never written.
+    cap = json.loads((OUT / (name + ".json")).read_text())["cap"]
 
     probe = load_face(source, WEIGHT[name], 256)
-    ink = -probe.getbbox("国", anchor="ls")[1] + probe.getbbox("国", anchor="ls")[3]
-    em = max(16, round(256 * INK_PX / ink))
+    box = probe.getbbox("国", anchor="ls")
+    em = max(16, round(256 * INK_PX / (box[3] - box[1])))
     font = load_face(source, WEIGHT[name], em)
     box = font.getbbox("国", anchor="ls")
-    ink = box[3] - box[1]
-    scale = HANZI_OVER_CAP * meta["cap"] / ink
+    scale = HANZI_OVER_CAP * cap / (box[3] - box[1])
 
     rows, glyphs = [], {}
     x = row_height = 0
-    y = atlas.height + 4
-    for char in todo:
+    y = 4
+    for char in chars:
         left, top, right, bottom = font.getbbox(char, anchor="ls")
         width, height = right - left, bottom - top
         if width == 0 or height == 0:
@@ -89,24 +90,25 @@ def append(source, name, chars):
         x += width + 4
         row_height = max(row_height, height)
     if not rows:
-        print(name, "already carries every character")
+        print(name + "-cjk: nothing to write")
         return
 
-    taller = Image.new("L", (WIDTH, y + row_height))
-    taller.paste(atlas, (0, 0))
-    draw = ImageDraw.Draw(taller)
+    atlas = Image.new("L", (WIDTH, y + row_height + 4))
+    draw = ImageDraw.Draw(atlas)
     for char, px, py in rows:
         draw.text((px, py), char, font=font, fill=255, anchor="ls")
-    taller.save(OUT / (name + ".png"))
-    meta["glyphs"] = {**meta["glyphs"], **glyphs}
-    (OUT / (name + ".json")).write_text(
-        json.dumps(meta, separators=(",", ":"), ensure_ascii=False) + "\n")
-    print(name, "cjk source sha256:", hashlib.sha256(Path(source).read_bytes()).hexdigest(),
-          "em", em, "scale", round(scale, 3), "glyphs", len(glyphs), "atlas", taller.size)
+    atlas.save(OUT / (name + "-cjk.png"), optimize=True)
+    # Written with an explicit newline so the file is byte-identical whichever
+    # platform regenerates it.
+    with open(OUT / (name + "-cjk.json"), "w", encoding="utf-8", newline="\n") as meta:
+        meta.write(json.dumps({"cap": cap, "glyphs": glyphs},
+                               separators=(",", ":"), ensure_ascii=False) + "\n")
+    print(name + "-cjk", "source sha256:", hashlib.sha256(Path(source).read_bytes()).hexdigest(),
+          "em", em, "scale", round(scale, 3), "glyphs", len(glyphs), "atlas", atlas.size)
 
 
 if len(sys.argv) < 3:
     sys.exit(__doc__)
 chars = wanted(sys.argv[2:])
-append(sys.argv[1], "display", chars)
-append(sys.argv[1], "body", chars)
+build(sys.argv[1], "display", chars)
+build(sys.argv[1], "body", chars)
