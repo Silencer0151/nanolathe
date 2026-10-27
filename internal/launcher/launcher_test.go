@@ -302,15 +302,17 @@ func TestRemoveFilesKeepsWhatItDidNotMake(t *testing.T) {
 	}
 }
 
-func TestSettingsDefaultToStable(t *testing.T) {
+// TestSettingsDefaultToLatest: a player who has not chosen follows Latest;
+// Stable is kept once chosen.
+func TestSettingsDefaultToLatest(t *testing.T) {
 	in := windowsInstall(t)
-	if s, ok := in.LoadSettings(); ok || s.Channel != Stable {
+	if s, ok := in.LoadSettings(); ok || s.Channel != Latest {
 		t.Fatalf("defaults %+v, chosen %v", s, ok)
 	}
-	if err := in.SaveSettings(Settings{Channel: Latest}); err != nil {
+	if err := in.SaveSettings(Settings{Channel: Stable}); err != nil {
 		t.Fatal(err)
 	}
-	if s, ok := in.LoadSettings(); !ok || s.Channel != Latest {
+	if s, ok := in.LoadSettings(); !ok || s.Channel != Stable {
 		t.Fatalf("saved %+v, chosen %v", s, ok)
 	}
 	if in.SaveSettings(Settings{Channel: "nightly"}) == nil {

@@ -264,16 +264,15 @@ the folder is left alone, and the folder itself goes only once it is empty.
 
 At every start the launcher checks its channel. **Stable** is the newest
 published `vX.Y.Z` release with native assets; **Latest** is the
-highest-numbered complete `native-<n>` release. Until the first Stable
-release exists, a player who has not chosen a channel follows Latest. One
-button reads Install, Update or Play. An update downloads the platform's
+highest-numbered complete `native-<n>` release. A player who has not chosen
+a channel follows Latest; Stable is an explicit choice. One button reads Install, Update or Play. An update downloads the platform's
 package, verifies every file against `SHA256SUMS`, unpacks it into a staging
 directory, checks that the game starts (`--help`), then selects it
 atomically. The previous build is kept, older ones are pruned, and a newer
 launcher shipped in the package replaces the installed one at its next start.
-An offline or failed check leaves the installed build playable. On a PC with
-Smart App Control turned on, choosing Latest shows a warning, because Latest
-builds are unsigned.
+An offline or failed check leaves the installed build playable. No build is
+signed yet (signed releases are planned), so on a PC where Smart App Control
+is on or evaluating, the launcher warns that Windows may block the game.
 
 The launcher finds Total Annihilation through the game's own discovery
 (`--list-installs`) and validates a folder with `--check-install`. It

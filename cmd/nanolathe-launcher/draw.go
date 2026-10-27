@@ -270,7 +270,7 @@ func (a *app) drawChannel(dst *ebiten.Image, f frame) {
 		a.mu.Unlock()
 	}})
 	a.hits.Add(screenkit.Region{ID: "channel", Rect: r, Click: toggle})
-	notes := map[launcher.Channel]string{launcher.Stable: "Signed releases", launcher.Latest: "Every change, unsigned"}
+	notes := map[launcher.Channel]string{launcher.Stable: "Numbered releases", launcher.Latest: "Every change"}
 	for i, ch := range []launcher.Channel{launcher.Stable, launcher.Latest} {
 		row := screenkit.Rect{X: r.X, Y: r.Y + r.H + float64(i)*44*u, W: r.W, H: 44 * u}
 		id := "channel-" + string(ch)
@@ -371,12 +371,13 @@ func (a *app) drawMain(dst *ebiten.Image, f frame) {
 	}
 	row(198*u, "Game folder", folder, folderColor)
 
+	// No channel's builds are signed yet, so the warning applies to both.
 	note := ""
-	switch {
-	case f.settings.Channel == launcher.Latest && f.appControl == shell.AppControlOn:
-		note = "Smart App Control is on. It blocks unsigned programs it does not recognize, and Latest builds are unsigned, so Windows may refuse to start them. Choose Stable to play signed releases."
-	case f.settings.Channel == launcher.Latest && f.appControl == shell.AppControlEvaluation:
-		note = "Smart App Control is evaluating this PC. If Windows turns it on, it may block Latest builds, which are unsigned; Stable releases are signed."
+	switch f.appControl {
+	case shell.AppControlOn:
+		note = "Smart App Control is on. It blocks unsigned programs it does not recognize, and Nanolathe builds are not signed yet, so Windows may refuse to start them. Signed releases are planned."
+	case shell.AppControlEvaluation:
+		note = "Smart App Control is evaluating this PC. If Windows turns it on, it may block Nanolathe builds, which are not signed yet."
 	}
 	if note != "" {
 		a.paragraph(dst, note, x, 228*u, float64(windowW)*u-64*u, 1.4, screenkit.Style{Verbatim: true, Size: 11 * u, Top: amber, Shadow: 0.08})

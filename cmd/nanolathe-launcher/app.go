@@ -104,36 +104,25 @@ func (a *app) refreshInstalled() {
 	}
 }
 
-// check asks the channel for its release. Stable has none until the first
-// signed release; a player who has not chosen a channel then follows Latest
-// for now, so a first install can play, and Stable once it has a release.
-// A check the player overtook by switching channels is dropped.
+// check asks the player's channel for its release; a player who has not
+// chosen one follows Latest (launcher.LoadSettings). A check the player
+// overtook by switching channels is dropped.
 func (a *app) check() {
 	a.mu.Lock()
 	a.checkGen++
-	gen, ch, chosen := a.checkGen, a.settings.Channel, a.chosen
-	if !chosen {
-		ch = launcher.Stable
-	}
+	gen, ch := a.checkGen, a.settings.Channel
 	a.checking, a.offered, a.offerErr = true, nil, nil
 	a.mu.Unlock()
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
 		rel, err := a.src.Find(ctx, ch, a.goos, a.goarch)
-		if errors.Is(err, launcher.ErrNoRelease) && !chosen {
-			ch = launcher.Latest
-			rel, err = a.src.Find(ctx, ch, a.goos, a.goarch)
-		}
 		a.mu.Lock()
 		defer a.mu.Unlock()
 		if gen != a.checkGen {
 			return
 		}
 		a.checking = false
-		if !chosen {
-			a.settings.Channel = ch
-		}
 		if err != nil {
 			a.offerErr = err
 			return

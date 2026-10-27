@@ -35,8 +35,8 @@ func PackageAsset(goos, goarch string) string {
 }
 
 // ErrNoRelease reports that a channel has no complete release for this
-// platform yet, which is the Stable channel's state until the first signed
-// release.
+// platform yet, which is the Stable channel's state until a vX.Y.Z release
+// carries native builds.
 var ErrNoRelease = errors.New("nanolathe: the channel has no release for this platform yet")
 
 // Release is one published build a channel offers.
