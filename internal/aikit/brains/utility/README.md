@@ -38,7 +38,7 @@ think.
 | quantity | definition |
 |---|---|
 | spend capacity | Σ build power × median metal (energy) per work unit — buildings for builders, mobile products for factories — computed once from the side's commander build tree |
-| pending | per product: max(own nanoframes, builders committed and still walking) × expected gain; so a planned solar counts before its frame exists, without double counting |
+| pending | per product: max(own nanoframes, builders committed and still walking) × expected gain; so a planned solar counts before its frame exists, without double counting. Under `play` part 16 an energy frame counts its gain × build progress, and only the builders beyond the frames count in full (§15) |
 | supply | income + pending + stock/`h` (short run); income + pending only (long run); long-run energy uses *expected* income (steady output + expected wind), not the current gust |
 | demand | max(expense, `demand_bp`‰ × spend capacity), but metal demand is capped by what the energy supply can accompany at `e_ratio`, and energy demand by what the metal supply can use (+ standing upkeep) — a starved resource makes the other look ample |
 | coverage / need | coverage = supply/demand (‰); need = mean of the short- and long-run reciprocals, cut by up to ¾ as the store fills from 85% to 100% (a full store is waste) |
@@ -253,7 +253,7 @@ runs defaults); persona keys (`think`, `react`, `apm`, `attention`,
 | `breadth` | 15 | 0–15 | production breadth, a sum of parts: 1 combat variety, 2 cheap fast combat units in the mix, 4 mobile radar and jammers with the army, 8 assist builders for the factories (§13.16); 0 is the brain before §13.16 game for game |
 | `cloak` | 1 | 0–1 | switch: cloak-capable units, the commander included, cloak while threatened (or authored to start cloaked) and the energy store pays (§14.1) |
 | `gates` | 1 | 0–1 | switch: a Talon gate pair from the base to the front, dialed, carries the ground army (§14.2) |
-| `play` | 7 | 0–15 | the play review's changes (§15), each measured in mirrors against the brain without it, a sum of parts: 1 a factory whose army cannot reach the enemy is not the land constructor source while a land or hover factory that reaches is on offer, 2 the first constructor goes ahead of combat units at a shipyard or air plant while the commander is the only builder, 4 an extractor waits for energy coverage while the energy store is below half, 8 the launch value's army curve scaled by our income; 0 is the brain before the review |
+| `play` | 23 | 0–31 | the play review's changes (§15), each measured in mirrors against the brain without it, a sum of parts: 1 a factory whose army cannot reach the enemy is not the land constructor source while a land or hover factory that reaches is on offer, 2 the first constructor goes ahead of combat units at a shipyard or air plant while the commander is the only builder, 4 an extractor waits for energy coverage while the energy store is below half, 8 the launch value's army curve scaled by our income, 16 an energy building's frame counts its output by build progress, not in full from placement; 0 is the brain before the review |
 | `radar_home` | 1 | 0–1 | switch: from minute 10, while no stationary radar stands, is under way or is assigned over home, one there is wanted at need 4000 instead of the ordinary at most 1000, a quarter of the way from home to the front instead of halfway between the front and the rally point; 0 is the forward radar alone |
 | `wall_build` | 1 | 0–1 | switch: with the defense plan, from minute `wall_from` an idle or helping constructor builds three wall pieces across the approach in front of a tower that serves the ground plan, in a zone enemy ground forces have approached; one segment per tower and per 90 s (§16) |
 | `wall_from` | 12 | 0–120 | minute from which `wall_build` builds segments (§16) |
@@ -2614,10 +2614,31 @@ games each:
 | Launch value's army curve scaled by our income | 53% ±15 | No (part 8, off) |
 | Factories follow banked income (`army=23`) | 52% ±15 | No |
 
-`play` defaults to 7 (parts 1, 2 and 4); `play=0` is the brain before the
-review. Part 1 first counted an air plant as the factory that reaches; on
-Sail Away the commander chose one again and again, could never place it,
+`play` defaults to 23 (parts 1, 2, 4 and 16); `play=0` is the brain before
+the review. Part 1 first counted an air plant as the factory that reaches;
+on Sail Away the commander chose one again and again, could never place it,
 and was left the only land builder, so air plants no longer count.
+
+**Energy frames by progress (part 16, 2026-10-26).** A review of why bases
+carry few generators found that an energy frame counted its full output
+from placement. A fusion frame is ten minutes from paying, so a side that
+placed one around minute 19 read its energy as covered one and a half to
+two times, built no other power, and stalled 12–15% of the time with its
+metal store full. Part 16 counts a frame's output × its build progress;
+builders still walking to a site count in full, as before, so a planned
+building is not started twice. In 32 sampled 20–30-minute sides, late
+energy stalls fell from 8.7% to 0.7%, 3.3% to 0.3% and 5.2% to 0.2% on the
+three sides that placed a fusion late, and from 5.8% to 5.0% overall;
+energy buildings per game barely moved (26.4 to 27.2). Under protocol v3
+against `play=7`, Gate A (12 land maps, 20 minutes) stopped at its first
+look at 50.0%, t90 [47.2, 52.8] (48 games), and Gate B (6 long maps, 40
+minutes) at 47.9%, t90 [37.8, 58.0] (24 games): no difference in strength.
+It is kept as a model fix, not as a gain.
+
+The rest of this review's few-generators findings are design, not bugs:
+energy follows metal (`e_ratio`, `metal` part 2), mobile builders' own
+output (8–9 per tier-1 constructor, 25 per commander) is a third or more of
+the income, and geothermal vents are not used (§9).
 
 **Left as found:** missile towers as the default tower (human data);
 clearing rocks and wrecks scores like an extractor because reclaim is

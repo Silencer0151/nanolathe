@@ -214,6 +214,7 @@ const (
 	playFirstConsSea             // the first constructor ahead of combat units at a shipyard or air plant
 	playMexPower                 // an extractor waits for energy coverage while the energy store is below half
 	playAttackIncome             // the launch value's army curve scaled by our income
+	playFramePower               // an energy frame's pending output counts by its build progress
 )
 
 // mexPowerLo and mexPowerHi (permille of energy coverage) are where an
