@@ -111,7 +111,8 @@ func adoptSourceInstall(in launcher.Install) {
 }
 
 // uninstall removes the shortcuts, the Apps & Features entry and the
-// installation, keeping saves and settings unless the player asks.
+// installation's files, keeping saves and settings unless the player asks.
+// Anything else in the folder stays (launcher.Install.RemoveFiles).
 func uninstall(in launcher.Install, running string) error {
 	if runtime.GOOS != "windows" {
 		return fmt.Errorf("nanolathe: to uninstall, delete %s and the Nanolathe shortcut", in.Base)
@@ -124,24 +125,16 @@ func uninstall(in launcher.Install, running string) error {
 		return err
 	}
 	self, _ := filepath.Abs(running)
-	entries, err := os.ReadDir(in.Base)
-	if err != nil {
-		return err
-	}
-	keep := map[string]bool{"saves": true, "settings.json": true}
-	for _, e := range entries {
-		path := in.Path(e.Name())
-		if strings.EqualFold(path, self) || (!removeAll && keep[strings.ToLower(e.Name())]) {
-			continue
-		}
-		_ = os.RemoveAll(path)
-	}
+	removeErr := in.RemoveFiles(removeAll, self)
 	// A running program cannot delete itself; a short-lived command removes
-	// the launcher, and the folder if nothing was kept, once it has exited.
+	// the launcher, and the folder once it is empty, after it has exited.
 	scheduleRemoval(self, in.Base)
 	message := "Nanolathe was removed."
 	if !removeAll {
 		message += "\n\nYour saves and settings are still in " + in.Base + "."
+	}
+	if removeErr != nil {
+		message += "\n\nSome files could not be removed: " + removeErr.Error()
 	}
 	shell.Notify(0, "Uninstall Nanolathe", message)
 	return nil

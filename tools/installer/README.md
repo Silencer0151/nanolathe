@@ -254,6 +254,14 @@ per-user Apps & Features entry that uninstalls through `--uninstall`, and
 starts the installed copy. An installed launcher always acts on the folder it
 runs from.
 
+Uninstalling removes the shortcuts, the Apps & Features entry and only the
+files the launcher, the source installers and the game create there: the
+launcher, `releases`, `logs`, the selection and remembered-folder files,
+`launcher.json`, `launch.ps1`, and a source installation's toolchains,
+caches, lock and work directories. Saves, `settings.json` and the Survival
+records stay unless the player asks to delete them too. Anything else in
+the folder is left alone, and the folder itself goes only once it is empty.
+
 At every start the launcher checks its channel. **Stable** is the newest
 published `vX.Y.Z` release with native assets; **Latest** is the
 highest-numbered complete `native-<n>` release. Until the first Stable

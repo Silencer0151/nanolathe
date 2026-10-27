@@ -184,6 +184,69 @@ func (in Install) Remember(root string) error {
 	return writeAtomic(in.rootFile(), []byte(data))
 }
 
+// playerFiles are the game's own files in the installation: saves, the
+// settings.json the launcher names for it, and the Survival records the
+// game keeps beside that file.
+var playerFiles = []string{"saves", "settings.json", "survival-bests.json"}
+
+// sourceInstallerFiles are what only the source installers use: their
+// private Go toolchains, module and build caches, and lock. Their work-*
+// and stage-* directories are matched by prefix.
+var sourceInstallerFiles = []string{"toolchains", "cache", "install.lock", ".install-lock"}
+
+// owned lists what the launcher and the source installers create in the
+// installation directory, by this platform's names.
+func (in Install) owned() []string {
+	names := append([]string{"releases", "logs", "launcher.json", in.LauncherExecutable(), in.LauncherExecutable() + ".old"},
+		sourceInstallerFiles...)
+	if in.windows() {
+		return append(names, "current.txt", "root.txt", "launch.ps1")
+	}
+	return append(names, "current", "current.next", "game-root", "launch.sh")
+}
+
+// RemoveFiles deletes what the launcher, the source installers and the game
+// made in the installation directory, and nothing else: a player may have
+// chosen a folder that holds other things. The player's files go only with
+// removePlayerFiles. running, the launcher doing this, cannot delete itself
+// while it runs and is left to its caller.
+func (in Install) RemoveFiles(removePlayerFiles bool, running string) error {
+	entries, err := os.ReadDir(in.Base)
+	if err != nil {
+		return err
+	}
+	owned := in.owned()
+	if removePlayerFiles {
+		owned = append(owned, playerFiles...)
+	}
+	var errs []error
+	for _, e := range entries {
+		name := e.Name()
+		if in.windows() {
+			name = strings.ToLower(name)
+		}
+		if strings.EqualFold(in.Path(e.Name()), running) || !ownedEntry(owned, name, e.IsDir()) {
+			continue
+		}
+		errs = append(errs, os.RemoveAll(in.Path(e.Name())))
+	}
+	return errors.Join(errs...)
+}
+
+// ownedEntry matches an owned name, a source installer's work-* or stage-*
+// directory, or an owned file's interrupted atomic write (<name>.*.tmp).
+func ownedEntry(owned []string, name string, dir bool) bool {
+	if dir && (strings.HasPrefix(name, "work-") || strings.HasPrefix(name, "stage-")) {
+		return true
+	}
+	for _, o := range owned {
+		if name == o || !dir && strings.HasPrefix(name, o+".") && strings.HasSuffix(name, ".tmp") {
+			return true
+		}
+	}
+	return false
+}
+
 // writeAtomic replaces a small file by renaming a complete temporary copy
 // over it.
 func writeAtomic(path string, data []byte) error {

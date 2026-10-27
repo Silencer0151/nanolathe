@@ -226,12 +226,11 @@ func containsString(list []string, s string) bool {
 	return false
 }
 
-// removeSourceInstallerFiles deletes what only the source installers use:
-// their private Go toolchains, module and build caches, interrupted work
-// and stage directories, and lock. Saves, settings, logs and the remembered
-// game folder stay.
+// removeSourceInstallerFiles deletes what only the source installers use
+// (sourceInstallerFiles), with their interrupted work and stage
+// directories. Saves, settings, logs and the remembered game folder stay.
 func (in Install) removeSourceInstallerFiles() {
-	for _, name := range []string{"toolchains", "cache", "install.lock", ".install-lock"} {
+	for _, name := range sourceInstallerFiles {
 		_ = os.RemoveAll(in.Path(name))
 	}
 	entries, err := os.ReadDir(in.Base)

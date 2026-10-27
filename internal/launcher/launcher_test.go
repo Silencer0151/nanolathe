@@ -255,6 +255,53 @@ func TestUpdateRefusesUnverifiedPackages(t *testing.T) {
 	}
 }
 
+// TestRemoveFilesKeepsWhatItDidNotMake: uninstalling from a shared folder
+// removes the installation's own files and leaves everything else; the
+// player's files go only when asked.
+func TestRemoveFilesKeepsWhatItDidNotMake(t *testing.T) {
+	in := windowsInstall(t)
+	sourceInstall(t, in)
+	for path, data := range map[string]string{
+		"Nanolathe-Launcher.exe": "MZ", "nanolathe-launcher.exe.old": "MZ", "launcher.json": "{}", "launch.ps1": "",
+		"logs/game.log": "", "survival-bests.json": "{}", "launcher.json.123.tmp": "",
+		"notes.txt": "mine", "Other Game/game.exe": "MZ", "work-notes.txt": "mine",
+	} {
+		path = filepath.Join(in.Base, filepath.FromSlash(path))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	unrelated := []string{"notes.txt", "Other Game/game.exe", "work-notes.txt"}
+	player := []string{"saves/game.SAV", "settings.json", "survival-bests.json"}
+	if err := in.RemoveFiles(false, in.Path("Nanolathe-Launcher.exe")); err != nil {
+		t.Fatal(err)
+	}
+	for _, kept := range append(append([]string{"Nanolathe-Launcher.exe"}, unrelated...), player...) {
+		if !exists(in, kept) {
+			t.Errorf("%s was removed", kept)
+		}
+	}
+	if entries, _ := os.ReadDir(in.Base); len(entries) != 7 {
+		t.Errorf("%d entries left, want the running launcher, 3 unrelated and 3 player files", len(entries))
+	}
+	if err := in.RemoveFiles(true, in.Path("Nanolathe-Launcher.exe")); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range player {
+		if exists(in, path) {
+			t.Errorf("%s was kept when the player asked to remove it", path)
+		}
+	}
+	for _, kept := range unrelated {
+		if !exists(in, kept) {
+			t.Errorf("%s was removed with the player's files", kept)
+		}
+	}
+}
+
 func TestSettingsDefaultToStable(t *testing.T) {
 	in := windowsInstall(t)
 	if s, ok := in.LoadSettings(); ok || s.Channel != Stable {
