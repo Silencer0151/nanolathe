@@ -50,7 +50,7 @@ type frame struct {
 	game       launcher.Installed
 	hasGame    bool
 	checking   bool
-	offered    *launcher.Release
+	offer      *launcher.Offer
 	offerErr   error
 	busy       string
 	progress   float64
@@ -70,7 +70,7 @@ type frame struct {
 func (a *app) frame() frame {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return frame{a.view, a.settings, a.game, a.hasGame, a.checking, a.offered, a.offerErr, a.busy, a.progress,
+	return frame{a.view, a.settings, a.game, a.hasGame, a.checking, a.offer, a.offerErr, a.busy, a.progress,
 		a.status, a.failed, a.root, a.appControl, a.dropdown, a.desktop, append([]string(nil), a.candidates...),
 		a.searching, a.selected, a.scroll, a.launchNext}
 }
@@ -172,12 +172,12 @@ func (a *app) drawAction(dst *ebiten.Image, f frame) {
 	case f.busy != "":
 		label = f.busy
 	case f.view == viewFolder:
-	case !f.hasGame && f.offered != nil:
+	case !f.hasGame && f.offer != nil:
 		label, gold, click = "INSTALL", true, a.update
 	case !f.hasGame && f.checking:
 		label = "CHECKING"
 	case !f.hasGame:
-	case f.offered != nil && !f.game.Current(*f.offered):
+	case f.offer != nil && f.offer.Standing == launcher.Forward:
 		label, gold, click = "UPDATE", true, a.update
 	default:
 		click = a.play
@@ -358,10 +358,12 @@ func (a *app) drawMain(dst *ebiten.Image, f frame) {
 		available, availableColor = "No "+channel+" release yet", amber
 	case f.offerErr != nil:
 		available, availableColor = "Could not check for updates; you can still play the installed version", amber
-	case f.offered != nil && f.hasGame && f.game.Current(*f.offered):
+	case f.offer != nil && f.offer.Standing == launcher.Current:
 		available, availableColor = "Up to date", green
-	case f.offered != nil:
-		available, availableColor = releaseLabel(f.offered)+" is ready to install", amber
+	case f.offer != nil && f.offer.Standing == launcher.Backward:
+		available, availableColor = "Your build is newer than "+channel+"'s release", amber
+	case f.offer != nil:
+		available, availableColor = releaseLabel(&f.offer.Release)+" is ready to install", amber
 	}
 	row(172*u, "Available", available, availableColor)
 
@@ -371,16 +373,20 @@ func (a *app) drawMain(dst *ebiten.Image, f frame) {
 	}
 	row(198*u, "Game folder", folder, folderColor)
 
+	// The launcher never moves a player back (launcher.Backward).
+	var notes []string
+	if f.offer != nil && f.offer.Standing == launcher.Backward {
+		notes = append(notes, "The launcher keeps it, and moves to "+channel+" once "+channel+" passes it.")
+	}
 	// No channel's builds are signed yet, so the warning applies to both.
-	note := ""
 	switch f.appControl {
 	case shell.AppControlOn:
-		note = "Smart App Control is on. It blocks unsigned programs it does not recognize, and Nanolathe builds are not signed yet, so Windows may refuse to start them. Signed releases are planned."
+		notes = append(notes, "Smart App Control is on. It blocks unsigned programs it does not recognize, and Nanolathe builds are not signed yet, so Windows may refuse to start them. Signed releases are planned.")
 	case shell.AppControlEvaluation:
-		note = "Smart App Control is evaluating this PC. If Windows turns it on, it may block Nanolathe builds, which are not signed yet."
+		notes = append(notes, "Smart App Control is evaluating this PC. If Windows turns it on, it may block Nanolathe builds, which are not signed yet.")
 	}
-	if note != "" {
-		a.paragraph(dst, note, x, 228*u, float64(windowW)*u-64*u, 1.4, screenkit.Style{Verbatim: true, Size: 11 * u, Top: amber, Shadow: 0.08})
+	if len(notes) > 0 {
+		a.paragraph(dst, strings.Join(notes, " "), x, 228*u, float64(windowW)*u-64*u, 1.4, screenkit.Style{Verbatim: true, Size: 11 * u, Top: amber, Shadow: 0.08})
 	}
 
 	idle := f.busy == ""
