@@ -15,6 +15,7 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/client"
 	"github.com/nanolathe-gg/nanolathe/internal/content"
 	"github.com/nanolathe-gg/nanolathe/internal/gameplay"
+	"github.com/nanolathe-gg/nanolathe/internal/film"
 	"github.com/nanolathe-gg/nanolathe/internal/i18n"
 	"github.com/nanolathe-gg/nanolathe/internal/input"
 	"github.com/nanolathe-gg/nanolathe/internal/modlibrary"
@@ -42,6 +43,9 @@ type nlScreen struct {
 	closing       bool // closed, waiting for the closing gesture to be released
 	ready         bool
 	fonts         screenkit.Fonts
+	// cjkFaces records whether fonts carries the Chinese atlases, so the faces
+	// are rebuilt once when a browser build's fetch lands, not every frame.
+	cjkFaces bool
 	art           *nlArt
 	pointer       *client.Cursors
 	pointerCS     *contentSet
@@ -214,7 +218,15 @@ func (s *nlScreen) warm(g *gameShell) {
 	if !s.ready {
 		s.fonts = screenkit.LoadFonts()
 		s.art = loadNLArt(s.baseFS)
+		s.cjkFaces = film.CJKReady()
 		s.ready = true
+	}
+	// A language may bring glyphs of its own: the Chinese atlases are decoded
+	// when it is selected, and a browser build fetches them, so the faces are
+	// rebuilt when they become available rather than when the card is applied.
+	if ready := film.CJKReady(); ready != s.cjkFaces {
+		s.fonts = screenkit.LoadFonts()
+		s.cjkFaces = ready
 	}
 	// The canvas the screen will open at: the window, or the display in
 	// fullscreen, in device pixels.
@@ -620,13 +632,7 @@ func (s *nlScreen) applyDraft(g *gameShell, draft nlDraft, touched map[string]bo
 		g.fullscreen = next.fullscreen
 		ebiten.SetFullscreen(next.fullscreen)
 	}
-	wasLanguage := i18n.Language()
 	g.chooseLanguage(next.language)
-	if i18n.Language() != wasLanguage {
-		// A language may bring glyphs of its own (the Chinese atlases are
-		// decoded on selection), so the faces are rebuilt after the switch.
-		s.fonts = screenkit.LoadFonts()
-	}
 	g.display.Width, g.display.Height = next.resolution.W, next.resolution.H
 	g.commitWindowSize()
 	g.saveSettings()

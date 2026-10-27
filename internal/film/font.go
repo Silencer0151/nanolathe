@@ -2,7 +2,6 @@ package film
 
 import (
 	"bytes"
-	"embed"
 	"encoding/json"
 	"image"
 	"image/draw"
@@ -10,12 +9,6 @@ import (
 	"sync"
 	"sync/atomic"
 )
-
-// These are presentation assets, independent of the retail game's fonts.
-// Provenance, reproduction instructions and OFL terms accompany the atlases.
-//
-//go:embed assets/*.png assets/*.json assets/OFL.txt assets/README.md
-var fontAssets embed.FS
 
 type atlasGlyph struct {
 	X, Y, W, H int
@@ -44,9 +37,10 @@ type atlasFace struct {
 
 // loadAtlasFace decodes one atlas pair into coverage mipmaps. name is the
 // asset stem: "display" and "body" for the Latin faces, "display-cjk" and
-// "body-cjk" for the optional Chinese additions.
+// "body-cjk" for the optional Chinese additions. The bytes come from readAsset,
+// which the host supplies: embedded in the executable, fetched in the browser.
 func loadAtlasFace(name string) *atlasFace {
-	metadata, err := fontAssets.ReadFile("assets/" + name + ".json")
+	metadata, err := readAsset(name + ".json")
 	if err != nil {
 		panic(err)
 	}
@@ -54,7 +48,7 @@ func loadAtlasFace(name string) *atlasFace {
 	if err := json.Unmarshal(metadata, face); err != nil {
 		panic(err)
 	}
-	data, err := fontAssets.ReadFile("assets/" + name + ".png")
+	data, err := readAsset(name + ".png")
 	if err != nil {
 		panic(err)
 	}
@@ -105,14 +99,30 @@ var filmFaces = sync.OnceValue(func() map[string]*atlasFace {
 // decodes the CJK atlases or pays for their mipmaps.
 var cjkEnabled atomic.Bool
 
-// EnableCJK loads the Chinese additions into both faces. Calling it more than
-// once is free: the merge happens on the first call that needs it.
-func EnableCJK() { cjkEnabled.Store(true) }
+// cjkReady reports whether the Chinese atlases can be read. An embedded build
+// has them the moment they are asked for; a browser build waits for its fetch.
+var cjkReady atomic.Bool
+
+// startCJKFetch asks the host to deliver the Chinese atlases. The executable
+// has nothing to do; the browser build replaces it with a fetch request.
+var startCJKFetch = func() {}
+
+// EnableCJK asks for the Chinese additions to both faces. An embedded build
+// merges them on the next lookup; a browser build starts the fetch and merges
+// them once the bytes arrive. Calling it more than once is free.
+func EnableCJK() {
+	cjkEnabled.Store(true)
+	startCJKFetch()
+}
 
 // CJKEnabled reports whether the Chinese atlases have been requested. Text that
 // names Chinese in Chinese itself must fall back to a Latin spelling while they
-// have not, or the language card would be blank.
+// are not available, or the language card would be blank.
 func CJKEnabled() bool { return cjkEnabled.Load() }
+
+// CJKReady reports whether the Chinese glyphs can be drawn yet. A host that has
+// to fetch them is not ready the moment it is asked.
+func CJKReady() bool { return cjkEnabled.Load() && cjkReady.Load() }
 
 // cjkFaces is the base pair with the Chinese additions merged in, built once
 // on first use. The CJK atlas carries every glyph it draws, so a key already
@@ -145,7 +155,7 @@ func textFace(name string) *atlasFace {
 	if name == "body" {
 		key = "body"
 	}
-	if cjkEnabled.Load() {
+	if CJKReady() {
 		return cjkFaces()[key]
 	}
 	return filmFaces()[key]
