@@ -237,17 +237,18 @@ func roomMapHolders(cs *contentSet, mapName string) (map[string]bool, error) {
 	if cs == nil || cs.unmappedMount == nil || strings.TrimSpace(mapName) == "" {
 		return holders, nil
 	}
+	if r := cs.generatedRecipe(mapName); r != nil {
+		// A generated map travels as its recipe; every seat makes it from
+		// the archives its sources come from (DESIGN_MAP_GENERATOR §10).
+		return roomRecipeHolders(cs, *r), nil
+	}
 	base := roomMapBase(mapName)
-	found, playable, generated := false, false, false
+	found, playable := false, false
 	for _, ext := range []string{".ota", ".tnt"} {
 		for _, src := range cs.unmappedMount.Sources("maps/" + base + ext) {
 			found = found || ext == ".ota"
 			path := filepath.Clean(src.Source.SourcePath)
 			switch {
-			case strings.HasPrefix(src.Source.ProviderID(), "generated:"):
-				// Held in this machine's memory; rooms are to carry a
-				// generated map by its recipe (DESIGN_MAP_GENERATOR §11).
-				generated = true
 			case src.Source.ProviderType != "directory":
 				holders[path] = true
 				playable = playable || ext == ".ota"
@@ -255,9 +256,6 @@ func roomMapHolders(cs *contentSet, mapName string) (map[string]bool, error) {
 				playable = playable || ext == ".ota"
 			}
 		}
-	}
-	if found && !playable && generated {
-		return nil, fmt.Errorf("nanolathe: naming the room's content failed: logical path maps/%s.ota, providers searched [generated maps], expected a map every seat can mount; online rooms do not take generated maps yet", base)
 	}
 	if found && !playable {
 		return nil, fmt.Errorf("nanolathe: naming the room's content failed: logical path online map, providers searched [%s], expected maps/%s.ota in an archive, a downloaded map package or the mod; loose files are not used online", strings.Join(cs.baseRoots, ", "), base)
@@ -291,6 +289,10 @@ func sortRoomContent(entries []session.MatchContentEntry) {
 // or the mod supplies needs no package.
 func roomMapPackages(cs *contentSet, mapName string) ([]session.MatchContentEntry, error) {
 	if cs == nil || len(cs.mapRoots) == 0 || cs.unmappedMount == nil {
+		return nil, nil
+	}
+	if cs.generatedRecipe(mapName) != nil {
+		// A saved generated map travels as its recipe, not as its package.
 		return nil, nil
 	}
 	base := roomMapBase(mapName)
@@ -455,6 +457,9 @@ type roomContentPlan struct {
 	addons []addonlibrary.Addon
 	enable []settings.AddonSelection
 	fetch  []modfetch.Entry
+	// generated is the room's generated map once this seat holds it, which
+	// the battle's content mounts from memory (DESIGN_MAP_GENERATOR §10).
+	generated []*generatedMap
 }
 
 // resolveRoomContent sorts each of entries into what this install holds, in
@@ -579,6 +584,10 @@ func roomContentFS(cs *contentSet, plan roomContentPlan) (*vfs.FS, vfs.FSOps, er
 	if err := mounted.MountGameRoots(roots); err != nil {
 		mounted.Close()
 		return nil, nil, fmt.Errorf("nanolathe: mounting the room's content failed: logical path <room content>, providers searched [%s], expected the archives and packages the room names: %w", strings.Join(cs.baseRoots, ", "), err)
+	}
+	if err := mountGeneratedMaps(mounted, plan.generated); err != nil {
+		mounted.Close()
+		return nil, nil, err
 	}
 	return mounted, cs.layout.Apply(mounted), nil
 }

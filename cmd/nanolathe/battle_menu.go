@@ -32,7 +32,9 @@ func (b *battleSession) applyBattleSchedule(intent ui.BattleScheduleIntent) {
 		p.applySchedule(intent)
 		return
 	}
-	if b.onlineBattle() {
+	// A replay continuation runs on this machine alone, so it pauses even
+	// when it keeps an online battle's rules (DESIGN_MULTIPLAYER §10.1).
+	if b.onlineBattle() && b.takeover == nil {
 		b.battleState().SetPauseTruth(false)
 		if b.cl != nil {
 			b.cl.SetPresentationPaused(false)
@@ -180,7 +182,11 @@ func (b *battleSession) activateBattleMenuButton(name string, cl *client.Client)
 		return
 	}
 	name = gui.CallbackName(name)
-	if b.onlineBattle() && (name == "SAVEGAME" || name == "LOADGAME" || name == "RESTART") {
+	if reason := b.takeoverRefusal(name); reason != "" {
+		b.onlineNotice(reason)
+		return
+	}
+	if b.multiplayerPersistence() && (name == "SAVEGAME" || name == "LOADGAME" || name == "RESTART") {
 		if b.replayPlayback() != nil {
 			b.onlineNotice("Saves, loads and restarts are unavailable while watching a replay")
 			return
@@ -255,7 +261,15 @@ func (b *battleSession) openBattleSaveLoadScreen(mode saveLoadMode) {
 	if b == nil || b.shell == nil {
 		return
 	}
-	if b.onlineBattle() {
+	action := "LOADGAME"
+	if mode == saveScreenMode {
+		action = "SAVEGAME"
+	}
+	if reason := b.takeoverRefusal(action); reason != "" {
+		b.onlineNotice(reason)
+		return
+	}
+	if b.multiplayerPersistence() {
 		if b.replayPlayback() != nil {
 			b.onlineNotice("Saves and loads are unavailable while watching a replay")
 			return

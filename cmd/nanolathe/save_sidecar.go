@@ -69,7 +69,7 @@ func (g *gameShell) saveSidecar() save.Sidecar {
 	if g.battle != nil {
 		out.SurvivalBest = g.battle.recordSurvivalBest()
 	}
-	out.UnitLimit = g.setup.UnitLimit
+	out.UnitLimit = g.configuredUnitLimit()
 	if g.cs != nil {
 		out.ContentProfile = g.cs.profile
 		switch {
@@ -85,6 +85,13 @@ func (g *gameShell) saveSidecar() save.Sidecar {
 	// A generated map's recipe, so the game loads after its memory mount is
 	// gone (docs/DESIGN_MAP_GENERATOR.md §10).
 	out.GeneratedMap = g.battleRecipe()
+	// A battle continued from an online replay ran on the room's content,
+	// which names its own add-ons; the record lets a load mount it again
+	// and keep the room's computers and team sight (DESIGN_MULTIPLAYER §10.1).
+	if g.battle != nil && g.battle.onlineOrigin != nil {
+		origin := *g.battle.onlineOrigin
+		out.OnlineReplay, out.Addons = &origin, nil
+	}
 	return out
 }
 
@@ -389,12 +396,9 @@ func installSaveSidecarLine(window *gui.Window) {
 
 // saveSidecarLine is the line's text for the save at bankPath: the mod and,
 // when any are active, the mutators and the count of unit restrictions
-// (§8.4). With loadSmartMakers, the Load dialog's player selection, the
-// mutators are the set the load will run under: the recorded ones with Smart
-// makers as selected, which a load follows instead of the record (§7.3). Nil,
-// for the Save dialog, shows the recorded set. An installed mod is named as
-// the Mods screen names it; one that is not installed by its id and version.
-func saveSidecarLine(bankPath string, loadSmartMakers *content.Factor) string {
+// (§8.4). An installed mod is named as the Mods screen names it; one that is
+// not installed by its id and version.
+func saveSidecarLine(bankPath string) string {
 	sc, ok, err := save.ReadSidecar(bankPath)
 	if err != nil {
 		return "Unreadable Nanolathe sidecar"
@@ -424,13 +428,8 @@ func saveSidecarLine(bankPath string, loadSmartMakers *content.Factor) string {
 	default:
 		line += fmt.Sprintf(" + %d add-ons", len(sc.Addons))
 	}
-	if m, err := content.ParseMutators(sc.Mutators); err == nil {
-		if loadSmartMakers != nil {
-			m.SmartMakers = *loadSmartMakers
-		}
-		if !m.IsZero() {
-			line += " - " + mutatorSummary(m)
-		}
+	if m, err := content.ParseMutators(sc.Mutators); err == nil && !m.IsZero() {
+		line += " - " + mutatorSummary(m)
 	}
 	if n := len(sc.Restrictions); n > 0 {
 		line += " - " + restrictionCountText(n)

@@ -8,13 +8,16 @@ import (
 
 // platformOnly are the packages allowed to reach Ebitengine and its purego:
 // the concrete window/loop/device adapter, the device-resolution screen
-// toolkit, the PCM device boundary, and the desktop binary that links them.
+// toolkit, the PCM device boundary, and the two windowed binaries that link
+// them: the desktop game and its launcher, whose window is drawn with the
+// screen toolkit.
 var platformOnly = map[string]bool{
 	"github.com/nanolathe-gg/nanolathe/internal/platform/ebitenapp": true,
 	"github.com/nanolathe-gg/nanolathe/internal/platform/gpurender": true,
 	"github.com/nanolathe-gg/nanolathe/internal/platform/screenkit": true,
 	"github.com/nanolathe-gg/nanolathe/internal/audiobackend":       true,
 	"github.com/nanolathe-gg/nanolathe/cmd/nanolathe":               true,
+	"github.com/nanolathe-gg/nanolathe/cmd/nanolathe-launcher":      true,
 }
 
 // TestOnlyThePlatformAdapterReachesEbitengine keeps the displayless boundary

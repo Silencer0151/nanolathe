@@ -152,7 +152,9 @@ func (s *Service) historyPlayer(viewer PlayerID) PlayerID {
 // byte-grid sampler reads the querying record's grid [03 §3.2] C8 step 4.
 //
 // It is composition-time configuration, set before the first tick and never
-// changed. A host must be a different, valid player that borrows no
+// changed during online play. Replay takeover can detach a computer through
+// TakeOverPerspective (DESIGN_MULTIPLAYER §10.1). A host must be a different,
+// valid player that borrows no
 // perspective itself; anything else is refused and changes nothing. Single-
 // player battles never set it: there every viewer already reads the local
 // slot's history bit and the unit's own status word.

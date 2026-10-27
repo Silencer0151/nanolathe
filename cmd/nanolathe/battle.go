@@ -41,7 +41,15 @@ type battleSession struct {
 	// unrecorded battle.
 	replay       *replayRecording
 	playback     *replayPlayback
+	takeover     *replayTakeover
 	survivalBest *survivalBestRun
+	// onlineOrigin marks a battle continued from an online replay, or loaded
+	// from one's offline save: what its saves record so a load mounts the
+	// room's content and keeps its computers' difficulties and team sight
+	// (DESIGN_MULTIPLAYER §10.1). roomContent holds a loaded one's room
+	// content mount until teardown.
+	onlineOrigin *save.SidecarOnlineReplay
+	roomContent  io.Closer
 	// preview owns a silent, isolated Settings scene (interface design §3.17).
 	preview                                bool
 	hostPresentation                       *settings.Presentation
@@ -1033,6 +1041,15 @@ func (b *battleSession) teardown(cl *client.Client) {
 	b.ended = true
 	b.playback.release()
 	b.playback = nil
+	if b.takeover != nil {
+		b.takeover.source.release()
+		b.takeover = nil
+	}
+	if b.roomContent != nil {
+		_ = b.roomContent.Close()
+		b.roomContent = nil
+	}
+	b.onlineOrigin = nil
 	b.sess = nil
 	b.cat = nil
 	b.cam = nil
@@ -1183,6 +1200,7 @@ func (b *battleSession) viewerStep(delta float64, cl *client.Client) {
 	b.radialPointerOwned = false
 	b.pumpLocalMultiplayer(cl)
 	b.pumpReplayPlayback(cl)
+	b.pumpReplayTakeover(cl)
 	b.followExecutor(cl.Enhanced())
 	b.syncCameraControls()
 	b.syncStrategicIcons(cl)

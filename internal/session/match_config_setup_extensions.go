@@ -10,10 +10,9 @@ import (
 
 // Required gameplay extensions of DESIGN_MULTIPLAYER §8.6. The positional
 // fields and the replay header's descriptive metadata remain unchanged.
-// Builder speed and Smart makers are mutators rather than seat rules, but
-// field 11's eleven step indices are frozen, so Builder speed's own step list
-// and the Smart makers switch travel here (docs/DESIGN_MODS_MUTATORS.md
-// "Builder speed", "Smart makers").
+// Builder speed is a mutator rather than a seat rule, but field 11's eleven
+// step indices are frozen, so its own step list travels here
+// (docs/DESIGN_MODS_MUTATORS.md "Builder speed").
 const (
 	matchChosenStartsExtension = 17
 	matchAlliedSightExtension  = 18
@@ -22,11 +21,10 @@ const (
 	// reproducing the battle needs, which belongs in a required record
 	// (§10 "Header extensions"), with the same admission contract.
 	matchGeneratedMapExtension = 20
-	matchSmartMakersExtension  = 21
 )
 
 func matchSetupExtension(id uint16) bool {
-	return id == matchChosenStartsExtension || id == matchAlliedSightExtension || id == matchBuilderSpeedExtension || id == matchGeneratedMapExtension || id == matchSmartMakersExtension
+	return id == matchChosenStartsExtension || id == matchAlliedSightExtension || id == matchBuilderSpeedExtension || id == matchGeneratedMapExtension
 }
 
 func (r *MatchConfigRequest) hasChosenStarts() bool {
@@ -114,19 +112,6 @@ func (r *MatchConfigRequest) consumeSetupExtensions() error {
 				return matchFieldError("generatedMap", "typed recipe equal to extension 20 when both are supplied")
 			}
 			r.GeneratedMap = append([]byte(nil), e.Data...)
-		case matchSmartMakersExtension:
-			reader := netproto.NewReader(e.Data, matchFieldError)
-			on := reader.U8()
-			if err := reader.End(); err != nil {
-				return err
-			}
-			if on != 1 {
-				return matchFieldError("mutators.smartMakers", "extension 21 contains 1 for on; omit it for off")
-			}
-			if typed := r.Mutators.SmartMakers; !typed.IsIdentity() && typed != content.SwitchOn() {
-				return matchFieldError("mutators.smartMakers", "typed Smart makers equal to extension 21 when both are supplied")
-			}
-			r.Mutators.SmartMakers = content.SwitchOn()
 		default:
 			kept = append(kept, e)
 		}
@@ -162,12 +147,6 @@ func (r *MatchConfigRequest) setupExtensions() ([]MatchConfigExtension, error) {
 	}
 	if len(r.GeneratedMap) != 0 {
 		fields = append(fields, MatchConfigExtension{ID: matchGeneratedMapExtension, Required: true, Data: append([]byte(nil), r.GeneratedMap...)})
-	}
-	if f := r.Mutators.SmartMakers; !f.IsIdentity() {
-		if f != content.SwitchOn() {
-			return nil, matchFieldError("mutators.smartMakers", "off or on")
-		}
-		fields = append(fields, MatchConfigExtension{ID: matchSmartMakersExtension, Required: true, Data: []byte{1}})
 	}
 	fields = append(fields, r.Extensions...)
 	if len(fields) > matchConfigMaxExtensions {

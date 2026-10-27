@@ -1988,7 +1988,10 @@ is the retail baseline and every fingerprint lock runs Classic.
   2026-09-25: old settings rows switch to Modern). `"modern"`, the word the
   first per-row encoding wrote, and any other word also read as Modern; the
   writer omits the key for a Modern row and for a row that is not a
-  computer player. A battle the command line composes takes
+  computer player. A replay continuation marks Modern every recorded human
+  still playing other than the seat taken over, on its existing manager
+  ([DESIGN_MULTIPLAYER §10.1](DESIGN_MULTIPLAYER.md#101-replay-takeover)).
+  A battle the command line composes takes
   `--ai-player <row>=<classic|modern>` or `--ai-player all=<classic|modern>`
   (repeatable, on `nanolathe` and `nanolathe-headless`): rows are numbered 1
   to 10 as the lobby numbers them — row 2 is a `--map` skirmish's computer
@@ -2401,7 +2404,7 @@ ticks:
 - *No record.* A retail save, or a sidecar without the record, loads as
   before: each controller starts from the load's own entry seed, so its style
   and opening variation are drawn again, and plays the brain's defaults (as
-  a save without a sidecar takes no recorded mutators). A record written before
+  a save without a sidecar takes no mutators). A record written before
   `overrides` existed restores no parameters, which is how its game played.
 - *Where it lives.* `session.SaveSidecar` writes the record as the
   sidecar's `ai` value (`save.Sidecar.AI`, raw JSON), and the desktop load
@@ -3478,7 +3481,10 @@ battle without it keeps its existing version-2 bytes. A save records it in the
 sidecar (`alliedSight`, DESIGN_MODS_MUTATORS §7.2): the bank keeps the
 alliance rows but not the ally groups `[08 R-SKIR-01 §2]` "Save
 persistence", so the load rebuilds the teams from the restored rows before
-the restored units publish coverage. A campaign takes none.
+the restored units publish coverage. A campaign takes none. The offline save
+of a continued online replay keeps its room's team sight in every mode,
+Strict 3.1 included, since the room shared it (user-authorized 2026-10-23,
+DESIGN_MULTIPLAYER §10.1).
 
 **Tests:** `TestAlliedSightTeamsFollowTheAllianceTable`,
 `TestAlliedSightIsRequiredExtension18`,

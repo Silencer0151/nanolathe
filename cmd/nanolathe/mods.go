@@ -215,7 +215,9 @@ func resolveStartupMutators(opts Options) (content.Mutators, error) {
 	return m, nil
 }
 
-// mutatorSummary is ASCII because the retail fonts carry no multiplication sign.
+// mutatorText is ASCII because the retail fonts carry no multiplication sign.
+func mutatorText(label string, f content.Factor) string { return label + " x" + f.String() }
+
 func mutatorSummary(m content.Mutators) string { return strings.Join(m.DescribeASCII(), ", ") }
 
 func mutatorCount(m content.Mutators) int { return len(m.DescribeASCII()) }
@@ -1705,7 +1707,7 @@ func mutatorRows(m content.Mutators) []mutatorRow {
 			rows = append(rows, mutatorRow{text: "&G" + group})
 		}
 		f, _ := m.Factor(info.Key)
-		rows = append(rows, mutatorRow{key: info.Key, text: "   " + info.Label + " " + info.ValueASCII(f)})
+		rows = append(rows, mutatorRow{key: info.Key, text: "   " + mutatorText(info.Label, f)})
 	}
 	return rows
 }
@@ -1785,11 +1787,10 @@ func (g *gameShell) refreshMutatorsDialog() {
 	description, value, factor := "", "", ""
 	if ok {
 		f, _ := modsUI.mutators.Factor(info.Key)
-		description, value, factor = info.Description, info.Label, info.ValueASCII(f)
-		// Each mutator cycles on its own step list (Builder speed's differs,
-		// and Smart makers is a two-step switch).
-		retailGreyGadget(p.Window, "MUTRAISE", info.Spell(f) == info.Spell(info.Steps[len(info.Steps)-1]))
-		retailGreyGadget(p.Window, "MUTLOWER", info.Spell(f) == info.Spell(info.Steps[0]))
+		description, value, factor = info.Description, info.Label, "x"+f.String()
+		// Each mutator cycles on its own step list (Builder speed's differs).
+		retailGreyGadget(p.Window, "MUTRAISE", f.String() == info.Steps[len(info.Steps)-1].String())
+		retailGreyGadget(p.Window, "MUTLOWER", f.String() == info.Steps[0].String())
 		retailGreyGadget(p.Window, "MUTDEFAULT", f.IsIdentity())
 	}
 	retailGreyGadget(p.Window, "MUTRESETALL", modsUI.mutators.IsZero())

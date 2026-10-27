@@ -30,7 +30,7 @@ func (b *battleSession) isResultVisible() bool {
 			// replicas that disagree fail the room instead of showing a
 			// result (DESIGN_MULTIPLAYER §16.5).
 			return false
-		case !hosted && !ended:
+		case !hosted && !ended && b.takeover == nil:
 			// The loopback play test's relay stops when a seat leaves, so a
 			// local result waits for the shared end before offering any
 			// route that retires transport.

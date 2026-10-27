@@ -18,6 +18,9 @@ func (s *Session) triggerLocalPlayer() (int, bool) {
 	if s == nil || s.Econ == nil {
 		return 0, false
 	}
+	if s.seatCommands.replay.takeover {
+		return int(s.LocalOwner), true // the chosen continuation seat (DESIGN_MULTIPLAYER §10.1)
+	}
 	local, found := 0, false
 	for i := 0; i < len(s.Econ.Players); i++ {
 		p := &s.Econ.Players[i]

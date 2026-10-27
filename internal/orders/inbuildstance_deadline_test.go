@@ -8,6 +8,11 @@ package orders
 // and the record would otherwise have parked forever. The producer now exists
 // (the COB engine-write opcode, via units.Unit.raiseScriptTouched), so the
 // stand-in is gone and this test is what keeps it gone.
+//
+// Both tests run without a bound rule set, so they lock the Strict 3.1 wait.
+// The Modern retry deadline a rule set may add beside the gate is locked in
+// build_stance_modern_test.go (DESIGN_UNITS_ORDERS_COB "Modern build-stance
+// retry").
 
 import (
 	"testing"
@@ -23,7 +28,7 @@ func TestInBuildStanceWaitSetsNoDeadline(t *testing.T) {
 	u := &units.Unit{Handle: 1, Def: &content.UnitDef{}}
 	n := &Node{Deadline: -1}
 
-	if code := inBuildStanceWait(u, n, 0, 500); code != 2 {
+	if code := inBuildStanceWait(u, n, 0, 0, 500, 0, 0); code != 2 {
 		t.Fatalf("stance clear returned %d, want hold (2) [04 R-ORD-01 §1]", code)
 	}
 	if n.Deadline != -1 {
@@ -50,9 +55,9 @@ func TestParkedBuildStanceRecordWaitsForTheMarkerNotTheClock(t *testing.T) {
 
 	q, u := gateFixture()
 	dispatched := 0
-	restore := setHandler(moveID, func(unit *units.Unit, n *Node, _ uint32, tick uint32) Code {
+	restore := setHandler(moveID, func(unit *units.Unit, n *Node, satisfied uint32, tick uint32) Code {
 		dispatched++
-		if code := inBuildStanceWait(unit, n, 0, tick); code != 1 {
+		if code := inBuildStanceWait(unit, n, 0, satisfied, tick, 0, 0); code != 1 {
 			return code
 		}
 		// The wait advanced. A real work handler would go on to its next

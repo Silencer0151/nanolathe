@@ -234,13 +234,7 @@ func (g *gameShell) refreshSaveLoadPanel() {
 	}
 	line := ""
 	if entry, has := saveLoadUI.SelectedEntry(); has {
-		// A load runs under the selected Smart makers (§7.3); the Save
-		// dialog shows what the file records.
-		var loadSmartMakers *content.Factor
-		if saveLoadUI.Mode() != saveScreenMode {
-			loadSmartMakers = &g.opts.Mutators.SmartMakers
-		}
-		line = g.fitDetail(saveSidecarLine(entry.Path, loadSmartMakers), saveSidecarLineWidth, 1)
+		line = g.fitDetail(saveSidecarLine(entry.Path), saveSidecarLineWidth, 1)
 	}
 	panel.SetText(saveSidecarLineGadget, line)
 }
@@ -616,7 +610,7 @@ func (g *gameShell) writeBattleSave(path, description string) error {
 	// mission's OTA and is deliberately not what a save records
 	// [08 R-SESS-01 §9] [08 R-SKIR-01 §6]. This shell's configured word is the
 	// setup record's, the same word that sizes a fresh or restored battle.
-	summary := session.RetailBattleSummary(sess, description, retailSaveGameID(), g.setup.UnitLimit)
+	summary := session.RetailBattleSummary(sess, description, retailSaveGameID(), g.configuredUnitLimit())
 	// The `Radar Image` box is written on live-battle saves only, and its
 	// raster is presentation's [08 "Summary"]; the session's summary carries
 	// whatever the host supplies here.

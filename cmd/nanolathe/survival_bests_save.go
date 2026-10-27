@@ -42,13 +42,7 @@ func (b *battleSession) recordSurvivalBest() json.RawMessage {
 	return data
 }
 
-// restoreSurvivalBest reads a loaded Survival save's personal-best
-// eligibility for the restored battle s (docs/DESIGN_SURVIVAL.md §8.1).
-// smartMakersChanged reports that the load runs under another Smart makers
-// selection than the save recorded (docs/DESIGN_MODS_MUTATORS.md D26): the
-// resumed run then plays under another mutator set than its key names, so it
-// leaves that key, with that reason rather than a content change.
-func restoreSurvivalBest(raw json.RawMessage, s *session.Session, fs vfs.FSOps, smartMakersChanged bool) (*survivalBestRun, error) {
+func restoreSurvivalBest(raw json.RawMessage, s *session.Session, fs vfs.FSOps) (*survivalBestRun, error) {
 	if s == nil || !s.IsSurvival() {
 		if len(raw) != 0 {
 			return nil, survivalBestSaveError("a personal-best record outside Survival")
@@ -89,9 +83,7 @@ func restoreSurvivalBest(raw json.RawMessage, s *session.Session, fs vfs.FSOps, 
 		if run.key == "" || rec.Content == "" {
 			return nil, survivalBestSaveError("eligibility without comparison and content identities")
 		}
-		if smartMakersChanged {
-			run.excluded = "Smart makers changed at load"
-		} else if digest, err := s.SurvivalSaveContentDigest(fs); err != nil || digest != run.content {
+		if digest, err := s.SurvivalSaveContentDigest(fs); err != nil || digest != run.content {
 			run.excluded = "content changed since save"
 		} else {
 			// Bests may have improved on this host since the save. Reload the

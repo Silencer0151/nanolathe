@@ -16,7 +16,7 @@ func TestInBuildStanceWaitArmsGateFour(t *testing.T) {
 	u := &units.Unit{Handle: 1, Def: &content.UnitDef{}}
 	n := &Node{DynamicGate: 0xE0, Deadline: -1} // a stale movement wait
 
-	if code := inBuildStanceWait(u, n, gateCancelCurrent, 10); code != 2 {
+	if code := inBuildStanceWait(u, n, gateCancelCurrent, 0, 10, 0, 0); code != 2 {
 		t.Fatalf("stance clear returned %d, want hold (2) [04 R-ORD-01 §1]", code)
 	}
 	if n.DynamicGate&gateBuildStance == 0 {
@@ -31,7 +31,7 @@ func TestInBuildStanceWaitArmsGateFour(t *testing.T) {
 
 	u.InBuildStance = true
 	n.DynamicGate = 0
-	if code := inBuildStanceWait(u, n, gateCancelCurrent, 11); code != 1 {
+	if code := inBuildStanceWait(u, n, gateCancelCurrent, 0, 11, 0, 0); code != 1 {
 		t.Fatalf("stance set returned %d, want advance (1) [04 R-ORD-01 §1]", code)
 	}
 	if n.DynamicGate != 0 {

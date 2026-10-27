@@ -299,6 +299,9 @@ func (b *battleSession) pumpMultiplayerTicks(cl *client.Client) {
 }
 
 func (b *battleSession) submitLocalMultiplayer(c session.HumanCommand) (uint64, error) {
+	if b.takeover != nil {
+		return b.submitReplayTakeover(c)
+	}
 	if b.multiplayer == nil || b.multiplayer.driver == nil {
 		return 0, localMultiplayerError("command", "a connected, running local relay")
 	}

@@ -7,6 +7,7 @@ HANDOFF*
 .worktrees/
 /nanolathe
 /nanolathe-headless
+/nanolathe-launcher
 # Windows builds of any command or test binary.
 *.exe
 # Obsolete model-authoring workspace and local tool binaries.

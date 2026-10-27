@@ -64,14 +64,10 @@ no RNG and no per-tick state, and it is owned by
 [DESIGN_MODS_MUTATORS](docs/DESIGN_MODS_MUTATORS.md) §6. Strict 3.1 *with no
 mutators* is the retail baseline, and every fingerprint lock runs with none.
 Anything data cannot express is not a mutator and follows the rules above.
-Two mutators are exceptions whose recorded value engine code reads. Builder
-speed (user-authorized 2026-10-22): its factor, recorded on each builder
-definition, runs the builder's build-animation script functions faster and
-starts a mobile build once in reach, as DESIGN_MODS_MUTATORS "Builder speed"
-bounds it. Smart makers (user-authorized 2026-10-22): its mark, recorded on
-each switchable metal-maker definition, lets the economy switch a human
-player's makers on at or above 80% of energy storage and off below 40% after
-each settlement pass, as DESIGN_MODS_MUTATORS "Smart makers" bounds it.
+The one exception is Builder speed (user-authorized 2026-10-22): its factor,
+recorded on each builder definition, is read by engine code to run the
+builder's build-animation script functions faster and to start a mobile build
+once in reach, as DESIGN_MODS_MUTATORS "Builder speed" bounds it.
 
 **Survival is a second mode-independent exception (user-authorized
 2026-09-23).** It is a scenario, not a rule: a skirmish session with a
@@ -88,7 +84,10 @@ sidecar (user-authorized 2026-10-21). It is owned by
 set's own planner) or Modern (the util+tac brain), chosen per player in
 skirmish and Survival in every gameplay mode, Strict 3.1 included, and
 nothing else chooses it: no rule set selects the Modern AI (the `modern-ai`
-set was retired; `--ai-player all=modern` marks every computer player). A
+set was retired; `--ai-player all=modern` marks every computer player). The
+one other chooser is a replay takeover, which hands the recording's other
+humans still playing to the Modern AI (user-authorized 2026-10-23,
+[DESIGN_MULTIPLAYER §10.1](docs/DESIGN_MULTIPLAYER.md#101-replay-takeover)). A
 Modern player plays under the bound set's rules but is paid in full in every
 mode, since its difficulty is its persona
 ([Modern AI full income](docs/DESIGN_ECONOMY_CONSTRUCTION.md#modern-ai-full-income));
@@ -163,6 +162,15 @@ official add-ons and map package without asking, and the host may turn
 optional content off (Q34, §16.8); and Nanolathe-hosted official Cavedog
 add-ons, mounted with the base game apart from the mod slot in every mode
 ([DESIGN_MODS_MUTATORS §5.7](docs/DESIGN_MODS_MUTATORS.md#57-official-add-ons)).
+On 2026-10-22 and 2026-10-23 the maintainer approved replay takeover in every
+mode: from a playback, continue the battle live as any recorded seat still
+playing, on the playback's own world, with the recording's other humans
+played by the Modern AI. A continued single-player replay saves, loads and
+pauses like any single-player battle; a continued online replay keeps the
+online simulation on this machine alone and pauses, and saves and loads as an
+offline skirmish on the room's content, keeping its computers' own
+difficulties and, in every mode including Strict 3.1, its team sight
+(§10.1). Playback views show the viewed seat's own sight.
 
 **Unit restrictions are the fifth mode-independent exception (user-authorized
 2026-10-05).** A restriction is retail's multiplayer unit-restriction count,

@@ -191,7 +191,11 @@ func (b *battleSession) stepPostBattle(delta float64, in *input.State, cl *clien
 			b.doResultAction(ui.ResultActionContinue, cl)
 		}
 	case "SaveGame":
-		if b.onlineBattle() {
+		if reason := b.takeoverRefusal("SAVEGAME"); reason != "" {
+			b.onlineNotice(reason)
+			return
+		}
+		if b.multiplayerPersistence() {
 			b.onlineNotice("Saves are unavailable in multiplayer games")
 			return
 		}
@@ -202,7 +206,7 @@ func (b *battleSession) stepPostBattle(delta float64, in *input.State, cl *clien
 			b.shell.openSaveLoadScreenReporting(saveScreenMode, saveLoadFromResults)
 		}
 	case "LoadGame":
-		if b.onlineBattle() {
+		if b.multiplayerPersistence() {
 			b.onlineNotice("Loads are unavailable in multiplayer games")
 			return
 		}

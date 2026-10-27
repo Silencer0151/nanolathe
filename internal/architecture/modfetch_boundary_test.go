@@ -14,9 +14,18 @@ const (
 	modLibraryPackage = nanolatheModule + "/internal/modlibrary"
 	desktopCommand    = nanolatheModule + "/cmd/nanolathe"
 	relayCommand      = nanolatheModule + "/cmd/nanolathe-server"
+	relayCheckCommand = nanolatheModule + "/cmd/nanolathe-relay-check"
 	relayPackage      = nanolatheModule + "/internal/relay"
 	lockstepPackage   = nanolatheModule + "/internal/lockstep"
+	launcherPackage   = nanolatheModule + "/internal/launcher"
+	launcherCommand   = nanolatheModule + "/cmd/nanolathe-launcher"
 )
+
+// isLauncherPackage reports whether an import path is the launcher's
+// installation package or one beneath it.
+func isLauncherPackage(importPath string) bool {
+	return importPath == launcherPackage || strings.HasPrefix(importPath, launcherPackage+"/")
+}
 
 // TestNetworkStaysInTheModFetcher pins the mod library's network boundary
 // (docs/DESIGN_MODS_MUTATORS.md §9 "Guards"):
@@ -30,11 +39,16 @@ const (
 //  3. No authoritative package depends on internal/modlibrary,
 //     internal/maplibrary, internal/addonlibrary or internal/modfetch: content
 //     selection happens before a session exists and never reaches a tick.
+//  4. The launcher's release download (internal/launcher) is the third
+//     package importing net/http. It belongs to a separate program: only
+//     cmd/nanolathe-launcher depends on it, so neither the game nor the
+//     displayless command can reach the network through it.
 //
 // Like the platform guard, it runs `go list -test` over the whole module.
-// Desktop download integration tests may serve loopback fixtures through
-// net/http and httptest. The ordinary desktop package is checked separately,
-// so this exception cannot admit a production HTTP import.
+// Desktop download and relay-check integration tests may serve loopback
+// fixtures through net/http and httptest; relay-check tests may also proxy a
+// fixture with httputil. Ordinary command packages are checked separately, so
+// these exceptions cannot admit a production HTTP import.
 func TestNetworkStaysInTheModFetcher(t *testing.T) {
 	root := repositoryRoot(t)
 	cmd := exec.Command("go", "list", "-test", "-f", "{{.ImportPath}}|{{join .Imports \" \"}}|{{join .Deps \" \"}}", "./...")
@@ -63,9 +77,18 @@ func TestNetworkStaysInTheModFetcher(t *testing.T) {
 			}
 		}
 
-		if owner != modFetchPackage && owner != relayPackage {
+		if owner != launcherCommand && !isLauncherPackage(owner) {
+			for _, dep := range deps {
+				if isLauncherPackage(dep) {
+					t.Errorf("%s depends on %s; only %s may", name, dep, launcherCommand)
+					break
+				}
+			}
+		}
+
+		if owner != modFetchPackage && owner != relayPackage && owner != launcherPackage {
 			for _, imported := range imports {
-				if owner == desktopCommand && name != desktopCommand && (imported == "net/http" || imported == "net/http/httptest") {
+				if (owner == desktopCommand || owner == relayCheckCommand) && name != owner && (imported == "net/http" || imported == "net/http/httptest" || (owner == relayCheckCommand && imported == "net/http/httputil")) {
 					continue
 				}
 				if imported == "net/http" || strings.HasPrefix(imported, "net/http/") {

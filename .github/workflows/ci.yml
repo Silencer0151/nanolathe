@@ -293,3 +293,136 @@ jobs:
           GH_TOKEN="$WEBSITE_DISPATCH_TOKEN" gh api repos/nanolathe-gg/nanolathe-gg.github.io/dispatches \
             -f event_type=browser-build -f "client_payload[revision]=${GITHUB_SHA}" \
             -f "client_payload[tag]=${{ steps.publish.outputs.tag }}"
+
+  # The prebuilt native executables, built and stamped exactly as the source
+  # installers build theirs, so they play online with installer builds
+  # (tools/native_build.py). The unsigned Windows executables are also kept
+  # on their own, in the layout code signing takes.
+  native:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: native build contracts
+        run: python3 -m unittest discover -s tools -p 'native_*_test.py'
+      - name: build stamped executables for every target
+        run: tools/native-build --revision "$GITHUB_SHA" --run-number "$GITHUB_RUN_NUMBER" --out build/native
+      - name: package the release assets
+        run: tools/native-package --build build/native --out build/native-dist
+      - name: keep the unsigned Windows executables
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-windows-unsigned
+          path: |
+            build/native/windows-amd64/nanolathe.exe
+            build/native/windows-amd64/nanolathe-launcher.exe
+            build/native/windows-arm64/nanolathe.exe
+            build/native/windows-arm64/nanolathe-launcher.exe
+          retention-days: 14
+          if-no-files-found: error
+      - name: keep the release assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-dist
+          path: build/native-dist
+          retention-days: 14
+          if-no-files-found: error
+
+  # Each packaged executable starts on its own platform, verifies against
+  # SHA256SUMS, and reports the stamp and revision build.json records. The
+  # Windows executables also carry the version resource signing requires.
+  native-smoke:
+    name: native smoke (${{ matrix.target }})
+    needs: native
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-latest
+            target: windows-amd64
+          - runner: windows-11-arm
+            target: windows-arm64
+          - runner: ubuntu-latest
+            target: linux-amd64
+          - runner: ubuntu-24.04-arm
+            target: linux-arm64
+    runs-on: ${{ matrix.runner }}
+    env:
+      TARGET: ${{ matrix.target }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: native-dist
+          path: dist
+      - name: packaged Windows executable runs and reports its build
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          foreach ($line in Get-Content dist/SHA256SUMS) {
+              $hash, $name = $line -split '  ', 2
+              if ((Get-FileHash -LiteralPath "dist/$name" -Algorithm SHA256).Hash -ne $hash) { throw "SHA256SUMS mismatch: $name" }
+          }
+          $build = Get-Content dist/build.json -Raw | ConvertFrom-Json
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          [IO.Compression.ZipFile]::ExtractToDirectory((Resolve-Path "dist/nanolathe-$env:TARGET.zip"), "$PWD\game")
+          New-Item -ItemType Directory empty | Out-Null
+          $exe = "$PWD\game\nanolathe.exe"
+          # Startup diagnostics go to standard error before an empty folder fails the check.
+          $report = cmd /c "`"$exe`" --check-install --root `"$PWD\empty`" 2>&1"
+          $report | Select-Object -First 6 | Write-Host
+          if (-not ($report -cmatch "^nanolathe: build manifest: $($build.build_manifest)$")) { throw 'The executable does not report the stamped build manifest.' }
+          if (-not ($report -cmatch "revision=$($build.revision) \(installed source\)")) { throw 'The executable does not report its source revision.' }
+          $launcher = "$PWD\game\nanolathe-launcher.exe"
+          foreach ($file in @($exe, $launcher)) {
+              $info = (Get-Item -LiteralPath $file).VersionInfo
+              if ($info.ProductName -cne 'Nanolathe' -or $info.FileVersion -cne $build.version -or $info.ProductVersion -cne $build.version) {
+                  throw "$file version resource names $($info.ProductName) $($info.FileVersion), expected Nanolathe $($build.version)."
+              }
+          }
+          # The setup download is the x64 launcher the x64 package carries.
+          $setup = (Get-FileHash -LiteralPath dist/Nanolathe-Setup.exe -Algorithm SHA256).Hash
+          if ($env:TARGET -eq 'windows-amd64' -and $setup -ne (Get-FileHash -LiteralPath $launcher -Algorithm SHA256).Hash) {
+              throw 'Nanolathe-Setup.exe is not the packaged x64 launcher.'
+          }
+          Write-Host "$env:TARGET reports build manifest $($build.build_manifest) and carries version $($info.FileVersion)."
+          exit 0
+      - name: packaged Linux executable runs and reports its build
+        if: runner.os == 'Linux'
+        run: |
+          set -eu
+          (cd dist && sha256sum -c SHA256SUMS)
+          manifest=$(sed -n 's/.*"build_manifest": "\([0-9a-f]*\)".*/\1/p' dist/build.json)
+          revision=$(sed -n 's/.*"revision": "\([0-9a-f]*\)".*/\1/p' dist/build.json)
+          mkdir game empty
+          tar -xzf "dist/nanolathe-$TARGET.tar.gz" -C game
+          # Startup diagnostics go to standard error before an empty folder fails the check.
+          report=$(game/nanolathe --check-install --root "$PWD/empty" 2>&1 || true)
+          echo "$report" | head -6
+          grep -qx "nanolathe: build manifest: $manifest" <<<"$report"
+          grep -qF "revision=$revision (installed source)" <<<"$report"
+          echo "$TARGET reports build manifest $manifest."
+
+  # Main's native executables become this run's immutable "native-<n>"
+  # prerelease, the launcher's Latest channel; tools/native-publish keeps this
+  # run's release and the one before it. They are unsigned: only Stable
+  # releases are signed, since each signature is approved by hand.
+  native-publish:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [native, native-smoke, hygiene, simulation, public-relay]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: native-publish
+      cancel-in-progress: false
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: native-dist
+          path: dist
+      - name: publish this run's native release
+        run: tools/native-publish --revision "$GITHUB_SHA" --run-number "$GITHUB_RUN_NUMBER" dist/*

@@ -287,10 +287,6 @@ func TestGeneratedMapMountsFromMemory(t *testing.T) {
 	if err != nil || len(worlds) != 1 || len(worlds[0].Maps) != 3 {
 		t.Fatalf("a generated map feeds the generator: %+v (%v)", worlds, err)
 	}
-	// No other seat has a map held in this machine's memory.
-	if _, err := onlineRoomContent(g.cs, nil, nil, name); err == nil || !strings.Contains(err.Error(), "generated maps") {
-		t.Fatalf("an online room took a generated map: %v", err)
-	}
 }
 
 // Save keeps the map in the library as a package whose receipt records the

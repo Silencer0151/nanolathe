@@ -201,3 +201,105 @@ desktop Start Menu launch before promoting the fix.
 
 The first install has a cold compiler/dependency cache, so measure its time
 separately from updates. No first-install duration is promised.
+
+## Prebuilt native builds
+
+CI also builds release executables, so a launcher can install a build
+instead of compiling one; the installers above do not use them yet.
+`tools/native-build` reproduces these installers' build exactly. It downloads
+the Go release that `/install/release.txt` pins and checks its hash, downloads
+the commit's codeload archive, stamps it with stampgen using the installers'
+build arguments and all six toolchain hashes, then cross-compiles Windows and
+Linux x64/ARM64 with `CGO_ENABLED=0`, `GOAMD64=v1` and `GOARM64=v8.0`. Its
+executables therefore carry the same build manifest as an installer build of
+the same commit, which online rooms require; `tools/native_build_test.py`
+fails if the installers' build arguments drift from it.
+
+After stamping, `internal/version/winresgen` gives each Windows executable a
+version resource (product name Nanolathe and a four-part file version) and
+the shortcut icon, as code signing requires. The resource is not part of the
+stamped source, so it leaves the stamp unchanged. A build numbers itself from
+the highest `vX.Y.Z` tag plus the workflow run number, for example
+`0.3.0.412`.
+
+`tools/native-package` writes `nanolathe-windows-{amd64,arm64}.zip` and
+`nanolathe-linux-{amd64,arm64}.tar.gz`. Each holds the game executable,
+`source-revision` (which the game shows as its revision), `LICENSE` and
+`NOTICE.md`; the Windows zips also hold `nanolathe-launcher.exe`. Beside them
+are `Nanolathe-Setup.exe` (the x64 launcher, which Windows players download),
+`build.json` (revision, version, build manifest digest) and `SHA256SUMS`. The
+**native** job runs on every push and pull request and keeps the unsigned
+Windows executables as their own artifact,
+`windows-{amd64,arm64}/{nanolathe,nanolathe-launcher}.exe`, for signing.
+**native-smoke** starts each packaged game on its own platform and checks that
+it reports the stamp and revision recorded in `build.json`, and that the
+Windows executables carry their version resources. On main,
+**native-publish** publishes the assets as an unsigned `native-<run number>`
+prerelease (the Latest channel), keeping the two newest, through the same
+release code as the browser build.
+
+To test unpushed changes locally, pass `--archive` a tar.gz of the tree whose
+one top directory is `nanolathe-<revision>/`, with `--revision` and
+`--version`. Builds that run on the host check their own stamp, so a Linux
+x64 or Windows x64 host verifies that target.
+
+## Windows launcher
+
+`cmd/nanolathe-launcher` installs, updates and starts prebuilt builds
+(`internal/launcher`). Players download `Nanolathe-Setup.exe`. Its first run
+offers to install into `%LOCALAPPDATA%\Nanolathe` for the current user, with
+no administrator rights. It copies itself there as `nanolathe-launcher.exe`,
+adds the Start Menu shortcut (and a desktop one if chosen), registers a
+per-user Apps & Features entry that uninstalls through `--uninstall`, and
+starts the installed copy. An installed launcher always acts on the folder it
+runs from.
+
+Uninstalling removes the shortcuts, the Apps & Features entry and only the
+files the launcher, the source installers and the game create there: the
+launcher, `releases`, `logs`, the selection and remembered-folder files,
+`launcher.json`, `launch.ps1`, and a source installation's toolchains,
+caches, lock and work directories. Saves, `settings.json` and the Survival
+records stay unless the player asks to delete them too. Anything else in
+the folder is left alone, and the folder itself goes only once it is empty.
+
+At every start the launcher checks its channel. **Stable** is the newest
+published `vX.Y.Z` release with native assets; **Latest** is the
+highest-numbered complete `native-<n>` release. A player who has not chosen
+a channel follows Latest; Stable is an explicit choice. One button reads
+Install, Update or Play. An update downloads the platform's package,
+verifies every file against `SHA256SUMS`, unpacks it into a staging
+directory, checks that the game starts (`--help`), then selects it
+atomically. The previous build is kept, older ones are pruned, and a newer
+launcher shipped in the package replaces the installed one at its next start.
+An offline or failed check leaves the installed build playable. No build is
+signed yet (signed releases are planned), so on a PC where Smart App Control
+is on or evaluating, the launcher warns that Windows may block the game.
+
+The launcher only moves a player forward (`internal/launcher` `Offer`).
+Before it offers or installs a release other than the installed one, it
+reads the release's verified `build.json` and asks the repository's compare
+API how the two source revisions relate
+(`compare/<installed>...<offered>?per_page=1&page=2`; the second one-commit
+page carries the status without the first page's file list, under 20 KB
+instead of up to megabytes). A release ahead of the installed build is
+offered, and one built from the same revision is up to date. One behind it
+or off its history is neither offered nor installed: after switching from
+Latest to an older Stable release, or when the newest `native-<n>` release
+is deleted, the window says the installed build is newer and is kept until
+the channel passes it. A comparison that fails offers nothing, like any
+failed check. A build with no recorded revision updates as before.
+
+The launcher finds Total Annihilation through the game's own discovery
+(`--list-installs`) and validates a folder with `--check-install`. It
+confirms a single result, offers a choice when several are found, and opens
+the Explorer folder picker when none are. It starts the game with the same
+`--root`, `--save-dir` and `NANOLATHE_SETTINGS` as the source installer's
+launcher, and writes its output to `logs/game-*.log`.
+
+It adopts a source installation in place, because the directory layout is
+the same. The first update keeps saves, settings, logs and `root.txt`,
+removes the private Go toolchain and build caches, replaces the Start Menu
+shortcut, and rewrites `launch.ps1` so older pinned shortcuts open the
+launcher. Set `NANOLATHE_RELEASES_API` to another repository's API root, such
+as `https://api.github.com/repos/<owner>/nanolathe`, to try a fork's
+releases.

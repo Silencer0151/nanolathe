@@ -105,6 +105,8 @@ package implements.
 | Package | Responsibility | Design document |
 |---|---|---|
 | `internal/install` | Host installation discovery and explicit/environment root selection before mounting | DESIGN_CONTENT_VFS |
+| `internal/launcher` | The launcher's installation policy over the source installers' directory layout: channel settings, finding a channel's release, the forward-only offer by source revision ancestry, SHA-256-verified download, staging, the start check and atomic selection, starting the game, and removing only the installation's own files. The launcher's HTTP boundary; only `cmd/nanolathe-launcher` imports it | `tools/installer/README.md` "Windows launcher" |
+| `internal/launcher/shell` | The launcher's desktop integration: shortcuts, the Windows Apps & Features entry, the folder picker, opening folders, confirmations, Smart App Control's state | `tools/installer/README.md` "Windows launcher" |
 | `vfs` | The logical content namespace: an overlay of loose directories and HPI-family archives (HAPI, cipher, SQSH) with mount order, shadowing and a provenance manifest | DESIGN_CONTENT_VFS |
 | `formats` | Lossless readers and writers for the authored formats — TDF (comments blanked with byte offsets preserved), GAF, TNT, 3DO, OTA, PAL, PCX, FNT, WAV, GUI, SCT, BMP | DESIGN_CONTENT_VFS |
 | `formats/zrb` | Stateful Smacker 2 movie decoder: indexed frames, palette deltas, PCM soundtrack and authored cadence | DESIGN_CONTENT_VFS |
@@ -213,6 +215,7 @@ renderer and the Metal and WebGPU prototypes are preserved on the
 |---|---|---|
 | `cmd/nanolathe` | The game: front-end screens, briefing, battle composition and dispatch, the battle HUD wiring, load/save screens, post-battle, `--shot` captures, `--headless` | DESIGN_INTERFACE_HUD_INPUT (screens, dispatch), DESIGN_SESSIONS_AI_SAVE (composition, headless) |
 | `cmd/nanolathe-headless` | The displayless runner: one authoritative session to a tick limit or result, JSON report | DESIGN_SESSIONS_AI_SAVE |
+| `cmd/nanolathe-launcher` | The launcher window, which is also the Windows setup download: installs itself, checks the chosen channel and offers forward updates, finds the Total Annihilation folder through the game, starts the game, and uninstalls with `--uninstall` | `tools/installer/README.md` "Windows launcher" |
 | `cmd/ai-arena` | Displayless computer-versus-computer matches and tournaments for the Modern AI research; registers its own `aikit` rule set, which the game never links | MODERN_AI_RESEARCH |
 | `mods`, `mods/example`, `mods/aikit` | What a build links beyond the three reserved rule sets, each registering itself from an init: `mods/example` a rule set selected by name, and `mods/aikit` the Modern AI's think step (`session.RegisterModernAI`), which is not a rule set and which the session gives every computer player marked Modern; imported only by commands | DESIGN_GAMEPLAY_RULES, DESIGN_SESSIONS_AI_SAVE |
 
@@ -220,7 +223,7 @@ renderer and the Metal and WebGPU prototypes are preserved on the
 
 | Package | Responsibility | Design document |
 |---|---|---|
-| `internal/architecture` | Repository guards that inspect source rather than importing it: the platform boundary, the network boundary (`net/http` only in `internal/modfetch` and `internal/relay`), random-stream ownership, retail-only content, shrink-only parity ratchets | this document, §6 |
+| `internal/architecture` | Repository guards that inspect source rather than importing it: the platform boundary, the network boundary (`net/http` only in `internal/modfetch`, `internal/relay` and the separate launcher's `internal/launcher`), random-stream ownership, retail-only content, shrink-only parity ratchets | this document, §6 |
 | `internal/cleanroom` | The clean-room lint and its per-file debt baseline | this document, §6 |
 | `internal/docs` | The citation resolver: every research citation in `docs/` and in Go comments resolves | this document, §6 |
 | `internal/compat/spec03` | Black-box checks of the published presentation boundary | DESIGN_PRESENTATION_CLIENT |
@@ -242,6 +245,7 @@ platform      cmd/nanolathe, cmd/nanolathe-headless ─► mods ─► session  
               cmd/nanolathe ─► upscale ─► formats, palette   (load-time 2× art, DESIGN_GPU_RENDERER §14)
               cmd/nanolathe ─► modfetch ─► modlibrary ─► content, gameplay, vfs   (mods, DESIGN_MODS_MUTATORS §4–§5)
               cmd/nanolathe-headless ─► headless
+              cmd/nanolathe-launcher ─► launcher, launcher/shell, platform/screenkit   (the launcher, tools/installer/README.md)
 
 presentation  client ─► render, hud, audio, camera, palette, input, model, frame,
                         units, visibility, world, content, formats, vfs, numeric, rng
@@ -284,7 +288,8 @@ rather than by convention:
 
 * **Only the platform adapter reaches Ebitengine.** `internal/platform/ebitenapp`,
   `internal/platform/gpurender`, `internal/platform/screenkit`,
-  `internal/audiobackend` and `cmd/nanolathe` are the only packages whose
+  `internal/audiobackend`, `cmd/nanolathe` and the launcher's window
+  (`cmd/nanolathe-launcher`) are the only packages whose
   import closure (including their test binaries) may contain the Ebitengine
   modules, purego among them. Every other package, and every other test, stands up with no
   window and no audio device.
