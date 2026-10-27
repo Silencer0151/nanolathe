@@ -280,7 +280,7 @@ Before it offers or installs a release other than the installed one, it
 reads the release's verified `build.json` and asks the repository's compare
 API how the two source revisions relate
 (`compare/<installed>...<offered>?per_page=1&page=2`; the second one-commit
-page carries the status without the first page's file list, about 10 KB
+page carries the status without the first page's file list, under 20 KB
 instead of up to megabytes). A release ahead of the installed build is
 offered, and one built from the same revision is up to date. One behind it
 or off its history is neither offered nor installed: after switching from
