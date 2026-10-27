@@ -9,6 +9,7 @@ package main
 // order, when it presses Ready.
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"strconv"
 
@@ -176,7 +177,8 @@ func onlineFrozenOf(cs *contentSet, r session.MatchConfigRequest) onlineFrozen {
 		room: session.MatchRoomInputs{Mod: r.Mod, ContentProfile: p.Name, ContentDirectories: dirs,
 			UnitRestrictions: append([]session.MatchUnitRestriction(nil), r.UnitRestrictions...),
 			RoomContent:      append([]session.MatchContentEntry(nil), r.RoomContent...),
-			PlayerView:       r.PlayerView, SpectatorView: r.SpectatorView, ReplayView: r.ReplayView, Policies: r.Policies},
+			PlayerView:       r.PlayerView, SpectatorView: r.SpectatorView, ReplayView: r.ReplayView, Policies: r.Policies,
+			GeneratedMap: bytes.Clone(r.GeneratedMap)},
 	}
 }
 

@@ -89,7 +89,10 @@ type onlineRoomState struct {
 	// addonFetch enables or downloads the official add-ons the room lists
 	// and this seat's content does not mount.
 	addonFetch roomAddonFetch
-	state      relay.HostedLobbyState
+	// roomMap is this seat's hold on the room's generated map, when its
+	// configuration carries a recipe (mapgen_online.go).
+	roomMap onlineRoomMap
+	state   relay.HostedLobbyState
 	// notice is a one-off status line, such as why readiness was cleared;
 	// a later change replaces it.
 	notice      string
@@ -392,7 +395,14 @@ func (g *gameShell) adoptOnlineBase(base session.EffectiveMatchConfig) {
 	r.content = resolveRoomContent(g.cs, r.archives, installedMapPackages(), r.known, r.baseReq.RoomContent)
 	r.contentCS = g.cs
 	g.startRoomPackageFetch()
-	r.mapMissing = !g.hasSkirmishMap(r.baseReq.MapName)
+	// A generated map is made here from the room's recipe rather than
+	// found or fetched (mapgen_online.go); the battle mounts it with the
+	// room's content.
+	g.adoptRoomMap()
+	if made := r.roomMap.made; made != nil {
+		r.content.generated = []*generatedMap{made}
+	}
+	r.mapMissing = !g.hasSkirmishMap(r.baseReq.MapName) && len(r.baseReq.GeneratedMap) == 0
 	r.capacity = 0
 	if !r.mapMissing && r.cat != nil {
 		if n, err := onlineMapCapacity(r.cat, r.baseReq.MapName); err == nil {
@@ -410,6 +420,7 @@ func (g *gameShell) closeOnlineRoom() {
 	if r.readyJob != nil {
 		r.readyJob.abandon()
 	}
+	r.roomMap.stop()
 	r.prepared.close()
 	if r.lobby != nil {
 		_ = r.lobby.Close()
@@ -464,6 +475,9 @@ func (g *gameShell) pollOnlineLobby() {
 	}
 	g.startRoomPackageFetch()
 	if g.pollRoomAddonFetch() {
+		changed = true
+	}
+	if g.pollRoomMap() {
 		changed = true
 	}
 	changed = state != r.state || changed
@@ -547,6 +561,8 @@ func (g *gameShell) onlineLobbyBlock() string {
 		return g.roomAddonFetchText()
 	case len(r.content.missing) > 0:
 		return strings.TrimSpace(roomMissingText(r.content.missing) + " " + g.roomFetchFailures() + " " + g.roomAddonFailures())
+	case g.roomMapText() != "":
+		return g.roomMapText()
 	case r.mapMissing:
 		return "The host chose " + r.baseReq.MapName + ", which you don't have."
 	case len(seats) < onlineMinHumans:
@@ -1301,9 +1317,16 @@ func (g *gameShell) pushOnlineSettings(next onlineSettings) {
 		g.refreshOnlineLobby()
 		return
 	}
+	if r.contentCS != g.cs {
+		// A map the picker's generator has just mounted: the room's catalog
+		// is compiled again on the new content first.
+		g.refreshOnlineRoomContent()
+	}
 	// The room content follows the map: a downloaded map brings its
-	// package and the limits it needs (§16.8).
+	// package and the limits it needs, and a generated one its recipe and
+	// the archives its sources come from (§16.8).
 	frozen := onlineFrozenOf(g.cs, r.baseReq)
+	frozen.room.GeneratedMap = g.cs.generatedRecipeRecord(next.mapName)
 	roomContent, err := onlineRoomContent(g.cs, r.archives, r.known, next.mapName)
 	if err == nil {
 		frozen.room.RoomContent = roomContent

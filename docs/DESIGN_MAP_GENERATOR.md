@@ -5,7 +5,7 @@ Nanolathe makes skirmish maps on demand (issue #145, user-authorized
 makes a map that looks like that world's own maps and is fair by the
 measurements it reports. The generator itself is `internal/mapgen` and
 the TNT and TDF writers (§1–§9). The map picker, generated maps, their
-recipes, and saves and replays on them are §10; online rooms follow (§11).
+recipes, saves and replays on them, and online rooms on them are §10.
 
 - Terrain is natural-looking and fractal rather than mirrored; a symmetric
   "tournament" mode may follow.
@@ -264,17 +264,28 @@ an archive of three maps the authored world made):
   its map again from them; a changed source, another generator version or
   other recorded hashes are refused, naming the difference;
 - Use mounts the map from memory below everything else, its recipe is found
-  by the map's name, it feeds no generator and no online room takes it;
+  by the map's name, and it feeds no generator;
 - Save installs a package whose receipt records the recipe, removable from
   the picker; names and package ids stay within what files and TDF values
   hold; Generate stands beside More maps;
 - a save's recipe finds its mounted map, makes a missing one again and
-  refuses a map of that name with other files.
+  refuses a map of that name with other files;
+- a room on a generated map names the archive of its sources, which holds
+  only maps, and its content serves the map from memory; the host's
+  generated map becomes the room's with its recipe; a guest makes the map
+  on the room's content and mounts it, and one whose source archive
+  differs is told why it cannot.
+
+The room tests add a second archive holding the authored support files, as
+an install holds them, since a room's content mounts archives only.
 
 `internal/save` and `internal/session`: sidecar schema 5 and extension 20
 round-trip, and their refusals. The retail tier plays a map made from
 Archipelago, its commanders on its starts, then loads the battle's save and
-verifies its replay on content where the map is made again from the recipe.
+verifies its replay on content where the map is made again from the recipe;
+and opens a room on such a map through a real local relay, where the guest
+makes the map from the recipe, both seats compose the same battle, and the
+battle starts and runs on it.
 
 ## 10. The map picker and generated maps
 
@@ -286,9 +297,9 @@ the measurements of §5, a column per start and a row per measurement with
 its spread, under a paragraph saying what they measure and that they
 promise nothing beyond it; and the map with its numbered starts. Another
 map draws a new seed. Use plays the map without keeping it; Save… keeps it
-under a typed name and description. An online room's picker greys Generate
-(§11). `--nl-shot DIR --nl-shot-only generator` captures the panel and its
-Save form for review.
+under a typed name and description. An online room's host generates the
+room's map the same way. `--nl-shot DIR --nl-shot-only generator` captures
+the panel and its Save form for review.
 
 **Sources.** The world's maps are the install's and the mod's archive maps
 of that planet (providers of the HPI family): never loose files, maps held
@@ -357,15 +368,23 @@ again from the recipe and mounted first, and a map of that name with other
 files is refused. A replay's content identity still covers the map's own
 files, so a map made differently cannot verify.
 
-**Online.** A room does not take a generated map yet: one held in memory is
-refused as room content, and a saved one is a package other seats cannot
-fetch, as any locally installed package (§11).
+**Online rooms** (`mapgen_online.go`, DESIGN_MULTIPLAYER §16.8). A room on
+a generated map — one the host holds in memory or a saved one — carries its
+recipe as extension 20, never its files or its package, and its content
+names the archives the recipe's sources come from, even those that hold
+only maps. Every seat holds the map before Ready. The host holds the one it
+made. Any other seat makes it from the recipe in the background on the
+room's own content — the archives the room names, as the battle mounts
+them — checks the recipe's hashes, and mounts it with the run's generated
+maps, so its lobby shows it and its battle draws it; meanwhile the lobby
+says it is making the room's map, and Ready waits. A seat that cannot make
+it, for missing or different sources or another generator version, is told
+why and cannot be ready. The battle's content set and a recorded room's
+playback mount the map from memory with the room's content. The identity
+digests at Ready compare the map's files as for any map.
 
 ## 11. Later
 
-- **Online rooms.** The room carries the recipe in extension 20; every
-  seat makes the map and verifies its hash before Ready, with the source
-  archives in the room's content agreement (DESIGN_MULTIPLAYER §16.8).
 - A symmetric tournament mode, validation with the engine's own pathfinder
   and more movement classes, and the official map editor's sections and
   tilesets as sources.

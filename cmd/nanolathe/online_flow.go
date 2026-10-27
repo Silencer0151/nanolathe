@@ -268,7 +268,9 @@ func (g *gameShell) startOnlineCreate() {
 		if err != nil {
 			return onlineJobResult{err: err}
 		}
-		base, err := onlineBaseConfig(cs, cat, settings, onlineCreationFrozen(cs, [2]uint32{sim, crt}, mutators, restrictions, records, roomContent))
+		frozen := onlineCreationFrozen(cs, [2]uint32{sim, crt}, mutators, restrictions, records, roomContent)
+		frozen.room.GeneratedMap = cs.generatedRecipeRecord(settings.mapName)
+		base, err := onlineBaseConfig(cs, cat, settings, frozen)
 		if err != nil {
 			return onlineJobResult{err: err}
 		}

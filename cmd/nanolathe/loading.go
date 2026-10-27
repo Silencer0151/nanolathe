@@ -340,8 +340,9 @@ func (g *gameShell) loadRetailSavePath(path string) error {
 	}
 	// A continued online replay loads as an offline skirmish on the room's
 	// content, keeping its computers' own difficulties and its team sight in
-	// every mode (DESIGN_MULTIPLAYER §10.1). The mount lives as long as the
-	// battle; until the battle holds it, a failure releases it.
+	// every mode (DESIGN_MULTIPLAYER §10.1); a room on a generated map mounts
+	// that map with it (DESIGN_MAP_GENERATOR §10). The mount lives as long as
+	// the battle; until the battle holds it, a failure releases it.
 	var roomContent io.Closer
 	defer func() {
 		if roomContent != nil {
@@ -355,7 +356,7 @@ func (g *gameShell) loadRetailSavePath(path string) error {
 			deps.SeatDifficulties = append(deps.SeatDifficulties, session.SeatDifficulty{Player: d.Player, Difficulty: d.Difficulty})
 		}
 		if len(origin.Content) != 0 {
-			mounted, view, err := mountRoomContent(g.cs, roomContentOf(origin))
+			mounted, view, err := mountRoomContent(g.cs, roomContentOf(origin), sidecar.GeneratedMap)
 			var missing *roomContentMissingError
 			if errors.As(err, &missing) {
 				return refuseLoad("This game needs %s from its online room, which this install does not have", joinNames(roomContentNames(missing.missing)))

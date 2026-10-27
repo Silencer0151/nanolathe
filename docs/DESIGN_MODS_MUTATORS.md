@@ -1924,7 +1924,8 @@ the previous checkpoint (DESIGN_SESSIONS_AI_SAVE §5).
    and says to start without it (DESIGN_MAP_GENERATOR §10).
    **Continued online replay.** An `onlineReplay` record replaces the add-on
    step: on the recorded mod, the load mounts the recorded room content as a
-   replay of that room does (DESIGN_MULTIPLAYER §16.8) and restores onto it,
+   replay of that room does (DESIGN_MULTIPLAYER §16.8), with the generated
+   map `generatedMap` names mounted from memory in it, and restores onto it,
    holding the mount for the battle's life; content this install lacks
    refuses the load, naming it. The restored skirmish takes the recorded seat
    difficulties and, in every mode, the room's team sight

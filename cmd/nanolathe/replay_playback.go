@@ -147,7 +147,7 @@ func replayContent(cs *contentSet, h replay.Header, progress content.Progress) (
 		// An undecodable configuration is replay.Compose's refusal to name.
 		return c, nil, nil
 	}
-	mounted, view, err := mountRoomContent(cs, config.Request().RoomContent)
+	mounted, view, err := mountRoomContent(cs, config.Request().RoomContent, config.Request().GeneratedMap)
 	if err != nil {
 		return c, nil, err
 	}
@@ -157,9 +157,12 @@ func replayContent(cs *contentSet, h replay.Header, progress content.Progress) (
 
 // mountRoomContent mounts a recorded room's content from this install, as
 // the room named it (DESIGN_MULTIPLAYER §16.8): for a playback, and for the
-// load of a continued online replay's offline save (§10.1). Content this
-// install lacks is a *roomContentMissingError. The closer releases the mount.
-func mountRoomContent(cs *contentSet, entries []session.MatchContentEntry) (io.Closer, vfs.FSOps, error) {
+// load of a continued online replay's offline save (§10.1). A room on a
+// generated map, whose recipe is recipe, mounts that map from memory with
+// it: the one cs holds, or one made now on the room's content, as every seat
+// made it (DESIGN_MAP_GENERATOR §10). Content this install lacks is a
+// *roomContentMissingError. The closer releases the mount.
+func mountRoomContent(cs *contentSet, entries []session.MatchContentEntry, recipe []byte) (io.Closer, vfs.FSOps, error) {
 	archives, err := baseArchives(cs)
 	if err != nil {
 		return nil, nil, err
@@ -167,6 +170,13 @@ func mountRoomContent(cs *contentSet, entries []session.MatchContentEntry) (io.C
 	plan := resolveRoomContent(cs, archives, installedMapPackages(), libraryAddonsOf(), entries)
 	if len(plan.missing) > 0 {
 		return nil, nil, &roomContentMissingError{missing: plan.missing}
+	}
+	if len(recipe) != 0 {
+		made, err := roomGeneratedMap(cs, plan, recipe)
+		if err != nil {
+			return nil, nil, err
+		}
+		plan.generated = []*generatedMap{made}
 	}
 	mounted, view, err := roomContentFS(cs, plan)
 	if err != nil {
