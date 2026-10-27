@@ -38,6 +38,13 @@ func ruleCalls(u *units.Unit, n *Node, sink *bool) []struct {
 		{"ScriptAttackSurfaceFire", func() {
 			*sink = rulesOfUnit(u).ScriptAttackSurfaceFire(ScriptAttackSurfaceFireRequest{Binding: bindingOfUnit(u), Actor: u})
 		}},
+		// The answer is whether the wait gained a deadline, which only Modern adds.
+		{"BuildStanceWait", func() {
+			n.Deadline = -1
+			rulesOfUnit(u).BuildStanceWait(BuildStanceWaitRequest{Builder: u, Record: n, Tick: 100})
+			*sink = n.Deadline != -1
+			n.Deadline, n.DynamicGate = -1, 0
+		}},
 	}
 }
 
