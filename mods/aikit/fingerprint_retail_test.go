@@ -51,6 +51,11 @@ import (
 // checksum, both streams, the partial fingerprint, the generators and the
 // applied counts all as before.
 //
+// Modern's kill-speed and hit-chance target ranking and its turret threat
+// policy (DESIGN_WEAPONS_PROJECTILES "Modern threat targeting and incoming fire") also move
+// the run digest. The updated value agrees on native arm64, amd64 under
+// Rosetta and js/wasm with one runtime worker; rehearsal is unchanged.
+//
 // HOW TO UPDATE. A change to the Modern AI's decisions, to a Modern rule or to
 // anything else this battle reaches moves these values; take the reported
 // ones and say in the commit message which behaviour changed and why. A value
@@ -58,7 +63,7 @@ import (
 // build is a lockstep defect, never a reason to update.
 const (
 	lockModernAITicks     = onlineModernSpan
-	lockModernAIRun       = "998db733d13b4034ba85abdf35a6da201bebc3c0513361869d863eaf6331fa2d"
+	lockModernAIRun       = "4a0c3019b729f45156bc8825b1530b34153ae0624614eb1372b61ad34f172492"
 	lockModernAIRehearsal = "15b9dfe98d242faf6a8811e701d35b1d1478a78a284f51f7d6ad7d565edc2dbc"
 )
 
