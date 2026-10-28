@@ -1,4 +1,4 @@
-# Offline tests; no Windows, network, Go compiler, or retail assets required.
+# Offline tests; no network, launcher, game or retail assets required.
 [CmdletBinding()]
 param()
 $ErrorActionPreference = 'Stop'
@@ -20,371 +20,150 @@ function Assert-Equal($Actual, $Expected, [string]$Message) {
 
 Assert-Equal (Resolve-NanolatheWindowsArchitecture @(9) $true) 'amd64' 'Native x64 selection'
 Assert-Equal (Resolve-NanolatheWindowsArchitecture @(12) $true) 'arm64' 'Native ARM64 selection, including emulated shells'
-Assert-Equal (Resolve-NanolatheWindowsArchitecture @(12, 12) $true) 'arm64' 'Multiple ARM64 processors'
 Assert-Throws { Resolve-NanolatheWindowsArchitecture @(9) $false } '32-bit PowerShell'
 Assert-Throws { Resolve-NanolatheWindowsArchitecture @() $true } 'missing CPU information'
-Assert-Throws { Resolve-NanolatheWindowsArchitecture @(0) $true } 'unsupported CPU'
 Assert-Throws { Resolve-NanolatheWindowsArchitecture @(9, 12) $true } 'inconsistent CPU information'
 
 $hash = 'a' * 64
-$manifest = @"
-version=alpha-1
-source_revision=$('b' * 40)
-source_tar_sha256=$hash
-source_zip_sha256=$hash
-go_version=1.25.0
-go_darwin_arm64_sha256=$hash
-go_darwin_amd64_sha256=$hash
-go_linux_amd64_sha256=$hash
-go_linux_arm64_sha256=$hash
-go_windows_amd64_sha256=$hash
-go_windows_arm64_sha256=$hash
-"@
-Assert-Equal (Read-NanolatheManifest $manifest).version 'alpha-1' 'Valid manifest'
-Assert-Equal (Read-NanolatheManifest ($manifest.Replace("`n", "`r`n"))).go_version '1.25.0' 'CRLF manifest'
-Assert-Equal (Read-NanolatheManifest ($manifest + "`nfuture_key=`$(throw 'must stay inert')")).future_key "`$(throw 'must stay inert')" 'Unknown keys remain data'
-Assert-Throws { Read-NanolatheManifest ($manifest + "`nversion=evil") } 'duplicate key'
-Assert-Throws { Read-NanolatheManifest ($manifest + "`nthrow 'execute'") } 'code instead of key=value'
-Assert-Throws { Read-NanolatheManifest ($manifest.Replace('alpha-1', '../other')) } 'path traversal'
-Assert-Throws { Read-NanolatheManifest ($manifest.Replace('alpha-1', "`$(throw 'execute')")) } 'code in version'
-Assert-Throws { Read-NanolatheManifest ($manifest.Replace(('b' * 40), ('B' * 40))) } 'uppercase revision'
-Assert-Throws { Read-NanolatheManifest ($manifest.Replace('go_version=1.25.0', 'go_version=latest')) } 'unpinned toolchain'
-Assert-Throws { Read-NanolatheManifest ($manifest.Replace("source_zip_sha256=$hash", 'source_zip_sha256=abc')) } 'bad digest'
-Assert-Throws { Read-NanolatheManifest ($manifest.Replace("source_tar_sha256=$hash", '')) } 'missing digest'
+$sums = Read-NanolatheChecksums "$hash  Nanolathe-Setup.exe`r`n$('b' * 64)  build.json`n"
+Assert-Equal $sums['Nanolathe-Setup.exe'] $hash 'SHA256SUMS with CRLF lines'
+Assert-Equal $sums['build.json'] ('b' * 64) 'SHA256SUMS second entry'
+Assert-Throws { Read-NanolatheChecksums "$hash  a`n$hash  a" } 'duplicate SHA256SUMS entry'
+Assert-Throws { Read-NanolatheChecksums "$hash ../escape" } 'path in SHA256SUMS'
+Assert-Throws { Read-NanolatheChecksums "abc  Nanolathe-Setup.exe" } 'short digest'
+Assert-Throws { Read-NanolatheChecksums "`$(throw 'run')  x" } 'code in SHA256SUMS'
+
+# Authored GitHub listings: assets are named; URLs are never fetched here.
+function New-Release([string]$Tag, [bool]$Prerelease, [string[]]$Assets, [bool]$Draft = $false) {
+    [pscustomobject]@{
+        tag_name = $Tag; prerelease = $Prerelease; draft = $Draft
+        assets = @($Assets | ForEach-Object { [pscustomobject]@{ name = $_; browser_download_url = "https://example.invalid/$Tag/$_" } })
+    }
+}
+$complete = @('Nanolathe-Setup.exe', 'SHA256SUMS', 'build.json')
+$stable = New-Release 'v0.4.0' $false $complete
+$listing = @(
+    (New-Release 'native-12' $true $complete), (New-Release 'native-14' $true @('SHA256SUMS')),
+    (New-Release 'native-15' $true $complete $true), (New-Release 'native-9' $true $complete),
+    (New-Release 'browser-20' $true @('SHA256SUMS')), $stable
+)
+Assert-Equal (Select-NanolatheRelease $listing).tag_name 'native-12' 'Latest even beside a Stable release; incomplete and draft releases skipped'
+Assert-Throws { Select-NanolatheRelease @($stable, (New-Release 'native-3' $true @('SHA256SUMS'))) } 'no Latest release carries the launcher'
+Assert-Equal (Get-NanolatheAssetUrl $stable 'SHA256SUMS') 'https://example.invalid/v0.4.0/SHA256SUMS' 'Asset URL'
+$plain = New-Release 'native-1' $true @('SHA256SUMS')
+$plain.assets[0].browser_download_url = 'http://example.invalid/SHA256SUMS'
+Assert-Throws { Get-NanolatheAssetUrl $plain 'SHA256SUMS' } 'download without HTTPS'
 
 $base = Join-Path ([IO.Path]::GetTempPath()) ("nanolathe-test O'Brien & `$x; [alpha] " + [guid]::NewGuid().ToString('N'))
+$environmentBefore = @{}
+foreach ($key in @('NANOLATHE_INSTALL_DIR', 'NANOLATHE_RELEASES_API')) {
+    $environmentBefore[$key] = [Environment]::GetEnvironmentVariable($key, 'Process')
+}
 try {
-    [void][IO.Directory]::CreateDirectory((Join-Path $base 'releases'))
-    Add-Type -AssemblyName System.IO.Compression
-    Add-Type -AssemblyName System.IO.Compression.FileSystem
-    $archive = Join-Path $base 'authored.zip'
-    $zip = [IO.Compression.ZipFile]::Open($archive, [IO.Compression.ZipArchiveMode]::Create)
-    try {
-        $entry = $zip.CreateEntry("nested O'Brien & [alpha]/sentinel.txt")
-        $writer = New-Object IO.StreamWriter($entry.Open())
-        try { $writer.Write('authored archive content') } finally { $writer.Dispose() }
-    } finally { $zip.Dispose() }
-    $unpack = Join-Path $base 'extracted [alpha]'
-    Expand-NanolatheArchive $archive $unpack
-    Assert-Equal ([IO.File]::ReadAllText((Join-Path $unpack "nested O'Brien & [alpha]/sentinel.txt"))) 'authored archive content' 'ZIP extraction round trip'
-    $old = Join-Path (Join-Path $base 'releases') 'old-release'
-    [void][IO.Directory]::CreateDirectory($old)
-    [IO.File]::WriteAllText((Join-Path $old 'nanolathe.exe'), 'working binary')
-    Write-NanolatheData (Join-Path $base 'current.txt') 'old-release'
-    $stage = Join-Path $base 'staging'
-    [void][IO.Directory]::CreateDirectory($stage)
-    $binary = Join-Path $stage 'nanolathe.exe'
-    [IO.File]::WriteAllText($binary, 'unverified binary')
-    $digest = (Get-FileHash -LiteralPath $binary -Algorithm SHA256).Hash
-    Test-NanolatheChecksum $binary $digest
-    Assert-Throws { Test-NanolatheChecksum $binary ('0' * 64) } 'checksum mismatch'
-    Assert-Throws { Publish-NanolatheRelease $base $stage 'new-release' { throw 'failed build or --help' } } 'failed verification'
-    Assert-Equal ([IO.File]::ReadAllText((Join-Path $base 'current.txt'))) 'old-release' 'Failure preserves active release'
-    Assert-Equal ([IO.File]::ReadAllText((Join-Path $old 'nanolathe.exe'))) 'working binary' 'Failure preserves old binary'
-    Assert-Throws { Publish-NanolatheRelease $base $stage 'new-release' {} { throw 'shortcut creation failed' } } 'failed shortcut preparation'
-    Assert-Equal ([IO.File]::ReadAllText((Join-Path $base 'current.txt'))) 'old-release' 'Shortcut failure preserves active release'
-    Assert-Equal ([IO.File]::ReadAllText((Join-Path $old 'nanolathe.exe'))) 'working binary' 'Shortcut failure preserves old binary'
-    $iconSource = Join-Path $PSScriptRoot 'windows\Nanolathe.ico'
-    [IO.File]::Copy($iconSource, (Join-Path $stage 'Nanolathe.ico'))
-    $shortcut = [pscustomobject]@{ TargetPath = ''; Arguments = ''; WorkingDirectory = ''; WindowStyle = 7; Description = ''; IconLocation = '' }
-    $systemRootBefore = $env:SystemRoot
-    if ([string]::IsNullOrEmpty($env:SystemRoot)) { $env:SystemRoot = Join-Path $base 'authored Windows' }
-    try {
-        $published = Publish-NanolatheRelease $base $stage 'new-release' {
-            param($candidate)
-            if ([IO.File]::ReadAllText($candidate) -cne 'unverified binary') { throw 'Wrong candidate' }
-            Write-Output 'Authored --help output'
-        } {
-            param($destination)
-            Set-NanolatheShortcutProperties $shortcut $base $destination
-        }
-    } finally { $env:SystemRoot = $systemRootBefore }
-    Assert-Equal ([IO.File]::ReadAllText((Join-Path $base 'current.txt'))) 'new-release' 'Success switches active release'
-    Assert-Equal ([IO.File]::ReadAllText((Join-Path $old 'nanolathe.exe'))) 'working binary' 'Success retains previous binary'
-    Assert-Equal $published (Join-Path (Join-Path $base 'releases') 'new-release') 'Published directory'
-    Assert-Equal $shortcut.WindowStyle 1 'Start Menu opens a normal window'
-    Assert-Equal $shortcut.Arguments.Contains('-WindowStyle Normal') $true 'PowerShell opens a normal window'
-    $iconPath = $shortcut.IconLocation.Substring(0, $shortcut.IconLocation.LastIndexOf(','))
-    Assert-Equal ([IO.Path]::GetDirectoryName($iconPath)) $published 'Shortcut icon belongs to the published release'
-    Assert-Equal $shortcut.IconLocation.Substring($shortcut.IconLocation.LastIndexOf(',')) ',0' 'Shortcut selects the ICO image'
-    Assert-Equal (Test-Path -LiteralPath $stage) $false 'Temporary stage was removed by promotion'
-    Test-NanolatheChecksum $iconPath (Get-FileHash -LiteralPath $iconSource -Algorithm SHA256).Hash
-    # On native Windows, prove WSH persists the icon on the actual shortcut,
-    # and that recreating it points to the updated release's surviving icon.
-    if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
-        Add-Type -AssemblyName System.Drawing
-        $nativeIcon = New-Object Drawing.Icon($iconPath)
-        try { if ($nativeIcon.Width -le 0) { throw 'Windows could not load the icon.' } }
-        finally { $nativeIcon.Dispose() }
-        $shell = New-Object -ComObject WScript.Shell
-        try {
-            $shortcutPath = Join-Path $base 'Nanolathe.lnk'
-            $nativeShortcut = $shell.CreateShortcut($shortcutPath)
-            Set-NanolatheShortcutProperties $nativeShortcut $base $published
-            $nativeShortcut.Save()
-            Assert-Equal ($shell.CreateShortcut($shortcutPath)).IconLocation $shortcut.IconLocation 'Saved Start Menu icon'
-            Assert-Equal ($shell.CreateShortcut($shortcutPath)).WindowStyle 1 'Saved Start Menu shortcut requests a normal window'
-            $next = Join-Path (Join-Path $base 'releases') 'next-release'
-            [void][IO.Directory]::CreateDirectory($next)
-            [IO.File]::Copy($iconSource, (Join-Path $next 'Nanolathe.ico'))
-            $nativeShortcut.WindowStyle = 7
-            Set-NanolatheShortcutProperties $nativeShortcut $base $next
-            $nativeShortcut.Save()
-            Assert-Equal ($shell.CreateShortcut($shortcutPath)).IconLocation ((Join-Path $next 'Nanolathe.ico') + ',0') 'Update refreshes the same shortcut icon'
-            Assert-Equal ($shell.CreateShortcut($shortcutPath)).WindowStyle 1 'Update restores a normal shortcut window'
-        } finally { [void][Runtime.InteropServices.Marshal]::ReleaseComObject($shell) }
-    }
+    [void][IO.Directory]::CreateDirectory($base)
+    $source = Join-Path $base 'new launcher.exe'
+    [IO.File]::WriteAllText($source, 'new launcher')
+    $installed = Install-NanolatheLauncher $base $source
+    Assert-Equal ([IO.File]::ReadAllText($installed)) 'new launcher' 'Launcher installed'
+    [IO.File]::WriteAllText($source, 'newer launcher')
+    [void](Install-NanolatheLauncher $base $source)
+    Assert-Equal ([IO.File]::ReadAllText($installed)) 'newer launcher' 'Launcher replaced'
+    Assert-Equal ([IO.File]::ReadAllText("$installed.old")) 'new launcher' 'Replaced launcher moved aside'
+    Assert-Throws { Install-NanolatheLauncher $base (Join-Path $base 'missing.exe') } 'missing source'
+    Assert-Equal ([IO.File]::ReadAllText($installed)) 'newer launcher' 'A failed copy keeps the installed launcher'
+    Remove-Item -LiteralPath $base -Recurse -Force
 
-    $launcher = Get-NanolatheLauncher
-    [void][Management.Automation.Language.Parser]::ParseInput($launcher, [ref]$tokens, [ref]$errors)
-    if ($errors.Count) { throw ($errors | Out-String) }
-    # The installed bootstrap retains the literal Base argument and pointer
-    # validation. test-shortcut.ps1 exercises the encoded loader in a child host.
-    [IO.File]::WriteAllText((Join-Path $published 'launch.ps1'), 'param($Base); $Base')
-    $bootstrap = [scriptblock]::Create((Get-NanolatheBootstrap))
-    Assert-Equal (& $bootstrap -Base $base) $base 'Bootstrap literal path round trip'
-    foreach ($invalidPointer in @('../new-release', "`$(throw 'must stay inert')")) {
-        Write-NanolatheData (Join-Path $base 'current.txt') $invalidPointer
-        Assert-Throws { & $bootstrap -Base $base } 'Bootstrap rejects invalid release pointers as data'
+    # Whole runs with authored GitHub, downloads and launcher. The launcher's
+    # --update is replaced by one that installs an authored game.
+    $setupBytes = [Text.Encoding]::UTF8.GetBytes('authored launcher')
+    $setupHash = -join ([Security.Cryptography.SHA256]::Create().ComputeHash($setupBytes) | ForEach-Object { $_.ToString('x2') })
+    $run = @{}
+    function Get-CimInstance { [pscustomobject]@{ Architecture = 9 } }
+    function Get-NanolatheJson([string]$Url) {
+        $run.Requests += $Url
+        return $listing
     }
-    Write-NanolatheData (Join-Path $base 'current.txt') 'new-release'
-    # A real child host with -NonInteractive must never display an update UI.
-    $installerLiteral = "'" + $installer.Replace("'", "''") + "'"
-    $noninteractiveCommand = ". $installerLiteral; if (Confirm-NanolatheUpdate 'alpha-1') { throw 'Noninteractive update accepted.' }"
-    $noninteractiveEncoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($noninteractiveCommand))
-    & (Get-Process -Id $PID).Path -NoProfile -NonInteractive -EncodedCommand $noninteractiveEncoded
-    Assert-Equal $LASTEXITCODE 0 'Noninteractive host keeps current version without prompting'
+    function Get-NanolatheDownload([string]$Url, [string]$Path) {
+        $run.Downloads += $Url
+        if ($Url.EndsWith('/SHA256SUMS')) { [IO.File]::WriteAllText($Path, "$($run.SetupHash)  Nanolathe-Setup.exe`n") }
+        else { [IO.File]::WriteAllBytes($Path, $setupBytes) }
+    }
+    function Invoke-NanolatheLauncherUpdate([string]$Launcher, [string]$Work) {
+        Assert-Equal ([IO.File]::ReadAllText($Launcher)) 'authored launcher' 'The verified launcher runs'
+        Assert-Equal (Split-Path $Launcher) $run.Base 'The launcher runs from the installation'
+        $run.Updates++
+        if ($run.Mode -eq 'update-fails') { return 1 }
+        $release = Join-Path (Join-Path $run.Base 'releases') '0.3.0.12-native-12'
+        [void][IO.Directory]::CreateDirectory($release)
+        [IO.File]::WriteAllText((Join-Path $release 'nanolathe.exe'), 'authored game')
+        Write-NanolatheData (Join-Path $run.Base 'current.txt') '0.3.0.12-native-12'
+        return 0
+    }
+    function Start-Process {
+        param([string]$FilePath, [string]$WorkingDirectory)
+        $run.Started += $FilePath
+    }
+    function Write-Host([string]$Object) { }
+    function Start-Transcript { }
+    function Stop-Transcript { }
 
-    # Exercise the emitted launcher with authored downloads and a native-game
-    # command seam. No network request, native game, or dialog runs in this test.
-    $updateTest = @{
-        Mode = 'unchanged'; Accept = $false; Downloads = @(); Offers = 0
-        CurrentLaunches = 0; NewLaunches = 0; Installed = $false
-        Root = (Join-Path $base 'game assets'); Base = $base
-    }
-    [void][IO.Directory]::CreateDirectory($updateTest.Root)
-    [void][IO.Directory]::CreateDirectory((Join-Path $base 'logs'))
-    $authoredInstaller = @'
-param([switch]$NoRun)
-if (!$NoRun) { throw 'Update must not launch from the installer.' }
-if ($env:NANOLATHE_INSTALL_DIR -cne $updateTest.Base) { throw 'Wrong update installation base.' }
-$updateTest.Installed = $true
-$ErrorActionPreference = 'SilentlyContinue'
-$ProgressPreference = 'Continue'
-if ($updateTest.Mode -eq 'failed') { throw 'Authored build failed.' }
-$destination = Join-Path (Join-Path $env:NANOLATHE_INSTALL_DIR 'releases') 'updated-release'
-[void][IO.Directory]::CreateDirectory($destination)
-[IO.File]::WriteAllText((Join-Path $destination 'nanolathe.exe'), 'authored new binary')
-[IO.File]::WriteAllText((Join-Path $destination 'launch.ps1'), @"
-param([string]`$Base, [string]`$Root)
-if (`$env:NANOLATHE_SKIP_UPDATE_CHECK -ne '1') { throw 'Missing relaunch guard.' }
-if (`$Base -cne `$updateTest.Base -or `$Root -cne `$updateTest.Root) { throw 'Relaunch lost original paths.' }
-`$updateTest.NewLaunches++
-if (`$updateTest.Mode -eq 'new-game-failed') { throw 'Authored new game failed.' }
-"@)
-[IO.File]::WriteAllText((Join-Path $env:NANOLATHE_INSTALL_DIR 'current.txt'), 'updated-release')
-'@
-    # BOM + CRLF detects hashing after decode/reencode instead of the raw file.
-    $installerBytes = [byte[]](@(239, 187, 191) + [Text.Encoding]::UTF8.GetBytes($authoredInstaller.Replace("`n", "`r`n")))
-    $authoredPath = Join-Path $base 'authored-installer.ps1'
-    [IO.File]::WriteAllBytes($authoredPath, $installerBytes)
-    $installerHash = (Get-FileHash -LiteralPath $authoredPath -Algorithm SHA256).Hash
-    $updateTest.Manifest = $manifest + "`ninstaller_ps1_sha256=$installerHash"
-    function Get-NanolatheUpdateDownload([string]$Url, [string]$Path, [int]$TimeoutSeconds, [string]$Accept = 'application/octet-stream') {
-        Assert-Equal ($updateTest.Messages -contains 'Checking for Nanolathe updates...') $true 'Update feedback precedes network work'
-        $updateTest.Downloads += $Url
-        if ($Url -ceq 'https://nanolathe.gg/install/release.txt') {
-            Assert-Equal $TimeoutSeconds 3 'Manifest wait is bounded'
-            if ($updateTest.Mode -eq 'offline') { throw 'Authored network unavailable.' }
-            $text = $updateTest.Manifest
-            if ($updateTest.Mode -eq 'unchanged') { $text = $text.Replace(('c' * 40), ('b' * 40)) }
-            if ($updateTest.Mode -eq 'malformed') { $text += "`nversion=duplicate" }
-            if ($updateTest.Mode -eq 'missing-hash') { $text = $text.Replace("installer_ps1_sha256=$installerHash", 'future=1') }
-            if ($updateTest.Mode -eq 'bad-hash') { $text = $text.Replace($installerHash, ('0' * 64)) }
-            [IO.File]::WriteAllText($Path, $text)
-        } elseif ($Url -ceq 'https://api.github.com/repos/nanolathe-gg/nanolathe/commits/main') {
-            Assert-Equal $TimeoutSeconds 3 'Main lookup is bounded'
-            Assert-Equal $Accept 'application/vnd.github.sha' 'Request the plain commit ID'
-            if ($updateTest.Mode -eq 'main-offline') { throw 'GitHub unavailable.' }
-            $revision = 'c' * 40
-            if ($updateTest.Mode -eq 'unchanged') { $revision = 'd' * 40 }
-            if ($updateTest.Mode -eq 'invalid-main') { $revision = 'not-a-commit' }
-            [IO.File]::WriteAllText($Path, $revision)
-        } elseif ($Url -ceq 'https://nanolathe.gg/install.ps1') {
-            Assert-Equal $TimeoutSeconds 60 'Installer download is bounded'
-            [IO.File]::WriteAllBytes($Path, $installerBytes)
-        } else { throw "Unexpected update URL: $Url" }
-    }
-    function Confirm-NanolatheUpdate([string]$Version) {
-        Assert-Equal $Version ('main-' + ('c' * 12)) 'Main change is offered with unchanged website manifest'
-        $updateTest.Offers++
-        return $updateTest.Accept
-    }
-    function Invoke-TestGame {
-        if ($args[0] -eq '--check-install') {
-            Assert-Equal $args[2] $updateTest.Root 'Game root validation keeps the original root'
-        } elseif ($args[0] -eq '--root') {
-            Assert-Equal $args[1] $updateTest.Root 'Current launch keeps original root'
-            Assert-Equal $args[2] '--save-dir' 'Current launch keeps save directory option'
-            Assert-Equal $args[3] (Join-Path $base 'saves') 'Current launch keeps save directory'
-            Assert-Equal $env:NANOLATHE_SETTINGS (Join-Path $base 'settings.json') 'Current launch keeps settings'
-            $updateTest.CurrentLaunches++
-        } else { throw 'Unexpected game invocation.' }
-        $global:LASTEXITCODE = 0
-    }
-    function Read-Host { return '' }
-    function Write-Host([string]$Object) { $updateTest.Messages += $Object }
-    $testLauncher = (Get-NanolatheLauncher).Replace('& $exe ', '& Invoke-TestGame ')
-    $environmentBefore = @{}
-    foreach ($key in @('NANOLATHE_INSTALL_DIR', 'NANOLATHE_SKIP_UPDATE_CHECK', 'NANOLATHE_SETTINGS')) {
-        $environmentBefore[$key] = [Environment]::GetEnvironmentVariable($key, 'Process')
-        [Environment]::SetEnvironmentVariable($key, 'authored-existing-value', 'Process')
-    }
-    try {
-        foreach ($mode in @('unchanged', 'offline', 'main-offline', 'invalid-main', 'malformed', 'missing-hash', 'decline', 'bad-hash', 'failed', 'accepted', 'new-game-failed', 'skip')) {
-            $updateTest.Mode = $mode
-            $updateTest.Accept = $mode -notin @('unchanged', 'offline', 'malformed', 'missing-hash', 'decline')
-            $updateTest.Downloads = @()
-            $updateTest.Messages = @()
-            $updateTest.Offers = 0
-            $updateTest.Installed = $false
-            $updateTest.CurrentLaunches = 0
-            $updateTest.NewLaunches = 0
-            [IO.File]::WriteAllText((Join-Path $old 'release.txt'), $manifest)
-            [IO.File]::WriteAllText((Join-Path $old 'source-revision'), ('d' * 40))
-            Write-NanolatheData (Join-Path $base 'current.txt') 'old-release'
-            $skipValue = 'authored-existing-value'
-            if ($mode -eq 'skip') { $skipValue = '1' }
-            [Environment]::SetEnvironmentVariable('NANOLATHE_SKIP_UPDATE_CHECK', $skipValue, 'Process')
-            $errorBefore = $ErrorActionPreference
-            $progressBefore = $ProgressPreference
-            if ($mode -eq 'new-game-failed') {
-                Assert-Throws { & ([scriptblock]::Create($testLauncher)) -Base $base -Root $updateTest.Root } 'New-game failure must not fall back and launch twice'
-            } else { & ([scriptblock]::Create($testLauncher)) -Base $base -Root $updateTest.Root }
-            Assert-Equal $ErrorActionPreference $errorBefore "$mode restores error preference"
-            Assert-Equal $ProgressPreference $progressBefore "$mode restores progress preference"
-            Assert-Equal $env:NANOLATHE_INSTALL_DIR 'authored-existing-value' "$mode restores installation environment"
-            Assert-Equal $env:NANOLATHE_SKIP_UPDATE_CHECK $skipValue "$mode restores skip environment"
-            Assert-Equal $env:NANOLATHE_SETTINGS 'authored-existing-value' "$mode restores settings environment"
-            $expectedOffers = [int]($mode -in @('decline', 'bad-hash', 'failed', 'accepted', 'new-game-failed'))
-            Assert-Equal $updateTest.Offers $expectedOffers "$mode update offers"
-            $expectedDownloads = [int]($mode -ne 'skip') + [int]($mode -notin @('skip', 'offline', 'malformed')) + [int]($mode -in @('bad-hash', 'failed', 'accepted', 'new-game-failed'))
-            Assert-Equal $updateTest.Downloads.Count $expectedDownloads "$mode download count"
-            Assert-Equal $updateTest.Installed ($mode -in @('failed', 'accepted', 'new-game-failed')) "$mode only executes a verified installer"
-            $newLaunches = [int]($mode -in @('accepted', 'new-game-failed'))
-            Assert-Equal $updateTest.NewLaunches $newLaunches "$mode new launch count"
-            Assert-Equal $updateTest.CurrentLaunches (1 - $newLaunches) "$mode current launch count"
-            if (!$newLaunches) {
-                Assert-Equal ([IO.File]::ReadAllText((Join-Path $base 'current.txt'))) 'old-release' "$mode retains selected release"
-            }
+    $cases = @(
+        @{ Name = 'fresh install'; Mode = 'ok'; NoRun = $false; Root = $true },
+        @{ Name = 'source installation update'; Mode = 'ok'; NoRun = $true; Source = $true },
+        @{ Name = 'checksum mismatch'; Mode = 'bad-sum'; NoRun = $true; Fails = $true },
+        @{ Name = 'launcher cannot install the game'; Mode = 'update-fails'; NoRun = $true; Fails = $true }
+    )
+    foreach ($case in $cases) {
+        if ([IO.Directory]::Exists($base)) { Remove-Item -LiteralPath $base -Recurse -Force }
+        [void][IO.Directory]::CreateDirectory($base)
+        $gameRoot = Join-Path $base 'Total Annihilation'
+        [void][IO.Directory]::CreateDirectory($gameRoot)
+        if ($case.ContainsKey('Source')) {
+            # What the PowerShell source installer left, minus its compiler.
+            $old = Join-Path (Join-Path $base 'releases') 'main-297b0734f02f-x-y'
+            [void][IO.Directory]::CreateDirectory($old)
+            [IO.File]::WriteAllText((Join-Path $old 'nanolathe.exe'), 'old game')
+            Write-NanolatheData (Join-Path $base 'current.txt') 'main-297b0734f02f-x-y'
         }
-    } finally {
-        foreach ($key in $environmentBefore.Keys) { [Environment]::SetEnvironmentVariable($key, $environmentBefore[$key], 'Process') }
-        Remove-Item function:Write-Host
+        $run = @{ Base = $base; Mode = $case.Mode; Requests = @(); Downloads = @(); Updates = 0; Started = @(); SetupHash = $setupHash }
+        if ($case.Mode -eq 'bad-sum') { $run.SetupHash = '0' * 64 }
+        $env:NANOLATHE_INSTALL_DIR = $base
+        $env:NANOLATHE_RELEASES_API = ''
+        $NoRun = $case.NoRun
+        $Root = ''
+        if ($case.ContainsKey('Root')) { $Root = $gameRoot }
+        $Help = $false
+        $launcherPath = Join-Path $base 'nanolathe-launcher.exe'
+        if ($case.ContainsKey('Fails')) {
+            Assert-Throws { Invoke-NanolatheInstaller } "$($case.Name) fails"
+            Assert-Equal $run.Started.Count 0 "$($case.Name): nothing starts"
+            if ($case.Mode -eq 'bad-sum') {
+                Assert-Equal ([IO.File]::Exists($launcherPath)) $false "$($case.Name): an unverified launcher is never installed"
+                Assert-Equal $run.Updates 0 "$($case.Name): an unverified launcher never runs"
+            }
+        } else {
+            Invoke-NanolatheInstaller
+            Assert-Equal ($run.Requests -join ' ') 'https://api.github.com/repos/nanolathe-gg/nanolathe/releases?per_page=50' "$($case.Name): reads only the release listing"
+            Assert-Equal ($run.Downloads -join ' ') ('https://example.invalid/native-12/SHA256SUMS https://example.invalid/native-12/Nanolathe-Setup.exe') "$($case.Name): downloads the checksums, then the launcher"
+            Assert-Equal ([IO.File]::ReadAllText($launcherPath)) 'authored launcher' "$($case.Name): installs the launcher"
+            Assert-Equal $run.Updates 1 "$($case.Name): the launcher installs the game once"
+            # A source installer's update check now runs the new release's loader.
+            $current = [IO.File]::ReadAllText((Join-Path $base 'current.txt'))
+            $loader = Join-Path (Join-Path (Join-Path $base 'releases') $current) 'launch.ps1'
+            [void][Management.Automation.Language.Parser]::ParseFile($loader, [ref]$tokens, [ref]$errors)
+            if ($errors.Count) { throw ($errors | Out-String) }
+            $startedBefore = $run.Started.Count
+            & ([scriptblock]::Create([IO.File]::ReadAllText($loader))) -Base $base -Root $gameRoot
+            Assert-Equal $run.Started[$startedBefore] $launcherPath "$($case.Name): the release loader opens the launcher"
+            Assert-Equal $run.Started.Count ($startedBefore + 1) "$($case.Name): the loader starts nothing else"
+            Assert-Equal $startedBefore ([int](!$case.NoRun)) "$($case.Name): the launcher opens unless -NoRun"
+            Assert-Equal ([IO.File]::Exists((Join-Path $base 'root.txt'))) ($case.ContainsKey('Root')) "$($case.Name): -Root is remembered"
+            if ($case.ContainsKey('Root')) { Assert-Equal ([IO.File]::ReadAllText((Join-Path $base 'root.txt'))) $gameRoot "$($case.Name): remembered folder" }
+        }
+        Assert-Equal (@(Get-ChildItem -LiteralPath $base -Directory -Filter 'work-*').Count) 0 "$($case.Name): no work folder left behind"
     }
-
-    # Issue #112: exercise the generated launcher's real selection loop, both
-    # directly (post-install) and through the encoded Start Menu command. Only
-    # native game calls and console input are authored; any dialog is a failure.
-    & {
-        $firstRoot = Join-Path $base 'retail game'
-        $secondRoot = Join-Path $base "TA O'Brien & `$literal; [custom]"
-        $unusableRoot = Join-Path $base 'incomplete game'
-        foreach ($folder in @($firstRoot, $secondRoot, $unusableRoot)) { [void][IO.Directory]::CreateDirectory($folder) }
-        $remembered = Join-Path $base 'root.txt'
-        $selection = @{}
-        function Add-Type { $selection.Dialogs++; throw 'Game-folder selection must not open a dialog.' }
-        function Read-Host([string]$Prompt) {
-            if ($Prompt -eq 'Press Enter to close') { return '' }
-            $selection.Prompts += $Prompt
-            if ($selection.Answers.Count -eq 0) { throw 'Unexpected selection prompt.' }
-            return $selection.Answers.Dequeue()
-        }
-        function Write-Host([string]$Object) { $selection.Messages += $Object }
-        function Invoke-SelectionGame {
-            $global:LASTEXITCODE = 0
-            if ($args[0] -eq '--list-installs') {
-                Assert-Equal $selection.Messages[-1] 'Searching for Total Annihilation installations...' 'Discovery feedback precedes native scan'
-                $selection.Discoveries++
-                return $selection.Candidates
-            }
-            if ($args[0] -eq '--check-install') {
-                Assert-Equal $selection.Messages[-1] "Checking Total Annihilation game data: $($args[2])" 'Validation feedback precedes native check'
-                $selection.Checks += $args[2]
-                if ($args[2] -eq $unusableRoot) { $global:LASTEXITCODE = 1; return 'Authored unusable game data.' }
-                Assert-Equal ($args[2] -in @($firstRoot, $secondRoot)) $true 'Only the chosen folder is validated'
-                return
-            }
-            Assert-Equal $args[0] '--root' 'Game starts with one selected root'
-            Assert-Equal $args.Count 4 'Selection never overlays installations'
-            $selection.Launches += $args[1]
-        }
-        $selectionLauncher = (Get-NanolatheLauncher).Replace('& $exe ', '& Invoke-SelectionGame ')
-        [IO.File]::WriteAllText((Join-Path $old 'launch.ps1'), $selectionLauncher)
-        Write-NanolatheData (Join-Path $base 'current.txt') 'old-release'
-        Write-NanolatheData (Join-Path $base 'launch.ps1') (Get-NanolatheBootstrap)
-        $shortcutCommand = [Text.Encoding]::Unicode.GetString([Convert]::FromBase64String(((Get-NanolatheLaunchCommand) -split ' ')[-1]))
-        $skipBefore = $env:NANOLATHE_SKIP_UPDATE_CHECK
-        $settingsBefore = $env:NANOLATHE_SETTINGS
-        $env:NANOLATHE_SKIP_UPDATE_CHECK = '1'
-        $env:NANOLATHE_SETTINGS = 'authored-settings-before-selection'
-        try {
-            $cases = @(
-                @{ Name = 'post-install number'; Candidates = @($firstRoot, $secondRoot); Answers = @('2'); Expected = $secondRoot },
-                @{ Name = 'shortcut number'; Candidates = @($firstRoot, $secondRoot); Answers = @('1'); Expected = $firstRoot; Shortcut = $true },
-                @{ Name = 'bad numbers retry'; Candidates = @($firstRoot, $secondRoot); Answers = @('0', '3', '999999999999999999999', '2'); Expected = $secondRoot },
-                @{ Name = 'invalid folder retry'; Candidates = @($firstRoot, $unusableRoot); Answers = @('2', '1'); Expected = $firstRoot },
-                @{ Name = 'pasted quoted path'; Candidates = @(); Answers = @('  "' + $secondRoot + '"  '); Expected = $secondRoot },
-                @{ Name = 'pasted single-quoted path'; Candidates = @($firstRoot, $secondRoot); Answers = @("'" + $secondRoot + "'"); Expected = $secondRoot },
-                @{ Name = 'single usable folder'; Candidates = @($secondRoot); Answers = @(); Expected = $secondRoot },
-                @{ Name = 'single unusable folder'; Candidates = @($unusableRoot); Answers = @($firstRoot); Expected = $firstRoot },
-                @{ Name = 'cancel'; Candidates = @($firstRoot, $secondRoot); Answers = @(''); Expected = '' },
-                @{ Name = 'stale memory cancellation'; Candidates = @($firstRoot, $secondRoot); Answers = @(' '); Expected = ''; Remembered = $unusableRoot; Shortcut = $true },
-                @{ Name = 'stale memory replacement'; Candidates = @($firstRoot, $secondRoot); Answers = @('2'); Expected = $secondRoot; Remembered = $unusableRoot },
-                @{ Name = 'remembered choice'; Candidates = @(); Answers = @(); Expected = $secondRoot; Remembered = $secondRoot; Shortcut = $true }
-            )
-            foreach ($case in $cases) {
-                if ([IO.File]::Exists($remembered)) { [IO.File]::Delete($remembered) }
-                if ($case.ContainsKey('Remembered')) { Write-NanolatheData $remembered $case.Remembered }
-                $selection = @{
-                    Candidates = $case.Candidates; Answers = (New-Object Collections.Queue)
-                    Prompts = @(); Messages = @(); Checks = @(); Launches = @(); Discoveries = 0; Dialogs = 0
-                }
-                foreach ($answer in $case.Answers) { $selection.Answers.Enqueue($answer) }
-                if ($case.ContainsKey('Shortcut')) {
-                    $directoryBefore = [Environment]::CurrentDirectory
-                    try {
-                        [Environment]::CurrentDirectory = $base
-                        & ([scriptblock]::Create($shortcutCommand))
-                    } finally { [Environment]::CurrentDirectory = $directoryBefore }
-                }
-                else { & ([scriptblock]::Create($selectionLauncher)) -Base $base }
-                if ($case.ContainsKey('Shortcut')) { Assert-Equal $selection.Messages[0] 'Opening Nanolathe...' "$($case.Name): shortcut announces startup" }
-                Assert-Equal $selection.Prompts.Count $case.Answers.Count "$($case.Name): consumes expected choices"
-                Assert-Equal ($selection.Launches -join '') $case.Expected "$($case.Name): launches only selected data"
-                Assert-Equal $selection.Launches.Count ([int]($case.Expected -ne '')) "$($case.Name): starts once or cancels"
-                Assert-Equal $selection.Dialogs 0 "$($case.Name): never attempts a dialog"
-                Assert-Equal $env:NANOLATHE_SETTINGS 'authored-settings-before-selection' "$($case.Name): restores settings"
-                if ($case.Expected -ne '') {
-                    Assert-Equal ([IO.File]::ReadAllText($remembered)) $case.Expected "$($case.Name): remembers validated choice"
-                } elseif ($case.ContainsKey('Remembered')) {
-                    Assert-Equal ([IO.File]::ReadAllText($remembered)) $case.Remembered "$($case.Name): cancellation preserves memory"
-                } else { Assert-Equal ([IO.File]::Exists($remembered)) $false "$($case.Name): cancellation writes no memory" }
-                if ($selection.Prompts.Count -gt 0) {
-                    Assert-Equal $selection.Prompts[0].Contains('press Enter') $true "$($case.Name): explains how to submit"
-                    for ($i = 0; $i -lt $case.Candidates.Count; $i++) {
-                        Assert-Equal ($selection.Messages -contains ('  {0}) {1}' -f ($i + 1), $case.Candidates[$i])) $true "$($case.Name): numbers each installation"
-                    }
-                }
-                if ($case.Name -eq 'remembered choice') { Assert-Equal $selection.Discoveries 0 'Valid memory bypasses discovery and prompting' }
-            }
-        } finally {
-            $env:NANOLATHE_SKIP_UPDATE_CHECK = $skipBefore
-            $env:NANOLATHE_SETTINGS = $settingsBefore
-        }
-    }
-    & (Join-Path $PSScriptRoot 'test-shortcut.ps1')
-    Write-Host 'Windows installer offline tests: OK'
 } finally {
+    foreach ($key in $environmentBefore.Keys) { [Environment]::SetEnvironmentVariable($key, $environmentBefore[$key], 'Process') }
     if ([IO.Directory]::Exists($base)) { Remove-Item -LiteralPath $base -Recurse -Force }
 }
+Microsoft.PowerShell.Utility\Write-Host 'Windows installer offline tests: OK'
