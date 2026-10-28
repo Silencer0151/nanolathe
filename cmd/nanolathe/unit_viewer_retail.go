@@ -7,6 +7,7 @@ import (
 
 	"github.com/nanolathe-gg/nanolathe/internal/content"
 	"github.com/nanolathe-gg/nanolathe/internal/gui"
+	"github.com/nanolathe-gg/nanolathe/internal/i18n"
 	"github.com/nanolathe-gg/nanolathe/internal/input"
 	"github.com/nanolathe-gg/nanolathe/internal/platform/screenkit"
 	"github.com/nanolathe-gg/nanolathe/internal/ui"
@@ -139,6 +140,7 @@ func (s *toolsScreen) refreshInfo() {
 		return
 	}
 	index := s.panel.Index("INFO")
+	s.infoLanguage = i18n.Language()
 	width := float64(s.panel.Window.Gadgets[index].Rect.W) - 2*unitViewerTextInset
 	switch s.infoTab {
 	case unitViewerTabWeapons:

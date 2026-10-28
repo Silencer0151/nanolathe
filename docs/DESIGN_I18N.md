@@ -48,6 +48,16 @@ set `Style.Verbatim` instead:
 - a unit viewer label, which the viewer translates before it fits the label
   on the CPU (`unitViewerFitText`).
 
+The unit viewer's CPU measurements use the same Verbatim choice as drawing.
+Its info rows store their final spelling: UI labels and notes are translated
+before measuring or wrapping, while authored descriptions, weapon names,
+side and movement keys retain their spelling. Drawing those stored rows is
+Verbatim. A language change rebuilds the retained rows, including when an
+optional font download finishes while the viewer is open. Unit names, IDs,
+content names and search input also draw and measure Verbatim, even when
+their text happens to match a catalog key or pattern. Long viewer text wraps
+between complete Unicode characters.
+
 The kept capitals, wrapped lines and fitted lines start over when the
 language changes.
 
@@ -112,7 +122,8 @@ the rest of the process; ordinary draws do not upload them again.
 Text Nanolathe draws with `screenkit` is translated wherever the catalog
 has an entry for it. The Ukrainian catalog covers the Nanolathe screen; the
 Chinese catalog also covers the unit viewer's own labels. Unit, weapon and
-description text in the viewer has no entry and stays as the content has it.
+description text in the viewer stays as the content has it, independently of
+catalog entries that happen to match it.
 
 These stay as the game's files have them:
 - the menus drawn in the original game's art;
