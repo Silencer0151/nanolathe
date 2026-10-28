@@ -77,6 +77,7 @@ func (g *gameShell) completeLanguage(ready bool, err error) {
 		g.languagePending = ""
 		fmt.Fprintf(os.Stderr, "nanolathe: Chinese fonts failed: logical path film, providers searched [browser], expected CJK atlases: %v\n", err)
 		if s := nlScreenInst; s != nil && s.open && s.shell() == g {
+			s.retainLanguageChoice(g)
 			s.toast, s.toastLeft = "Chinese fonts could not load. Apply to retry.", 6
 		}
 		return
@@ -86,6 +87,9 @@ func (g *gameShell) completeLanguage(ready bool, err error) {
 		g.languagePending = ""
 		g.setInterfaceLanguage(code)
 		if s := nlScreenInst; s != nil && s.open && s.shell() == g {
+			if !s.touched["language"] {
+				s.draft.language = languageIndex()
+			}
 			s.toast, s.toastLeft = "Settings saved", 2.2
 		}
 	}
@@ -108,12 +112,25 @@ func (g *gameShell) chooseLanguage(i int) {
 
 // languageIndex is the running language's place in i18n.Languages.
 func languageIndex() int {
+	return languageCodeIndex(i18n.Language())
+}
+
+func languageCodeIndex(code string) int {
 	for i, l := range i18n.Languages {
-		if l.Code == i18n.Language() {
+		if l.Code == code {
 			return i
 		}
 	}
 	return 0
+}
+
+// A shell rebind can occur before an optional download completes. Keep its
+// requested choice available for Apply without replacing a newer draft edit.
+func (s *nlScreen) retainLanguageChoice(g *gameShell) {
+	if g.requestedLanguage() == "chinese" && i18n.Language() != "chinese" && !s.touched["language"] {
+		s.draft.language = languageCodeIndex("chinese")
+		s.touched["language"] = true
+	}
 }
 
 // languageCard is the Game page's Language card. Each language is named, and

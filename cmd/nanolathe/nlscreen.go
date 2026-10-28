@@ -279,6 +279,7 @@ func (s *nlScreen) bindShell(g *gameShell) {
 	s.draft = s.freshDraft(g)
 	s.revealContent(s.draft.mod)
 	s.touched = map[string]bool{}
+	s.retainLanguageChoice(g)
 	s.pendingPresets = nil
 	s.installsSeen = modDownload.view().installs
 	s.bindSource(g)
@@ -543,16 +544,11 @@ func (s *nlScreen) apply() {
 		g.playMenuCue("BigButton")
 		return
 	}
-	language := s.draft.language
-	languageTouched := s.touched["language"]
 	s.applyDraft(g, s.draft, s.touched, s.pendingPresets)
 	s.draft = s.freshDraft(g)
+	s.retainLanguageChoice(g)
 	s.toast, s.toastLeft = "Settings saved", 2.2
-	if languageTouched && g.requestedLanguage() == "chinese" && i18n.Language() != "chinese" {
-		// Keep the requested choice unapplied until its fonts arrive, so the
-		// same Apply button can retry a failed optional download.
-		s.draft.language = language
-		s.touched["language"] = true
+	if g.requestedLanguage() == "chinese" && i18n.Language() != "chinese" {
 		s.toast, s.toastLeft = "Loading Chinese fonts...", 6
 		if film.CJKError() != nil {
 			s.toast = "Chinese fonts could not load. Apply to retry."
@@ -2970,6 +2966,7 @@ func (s *nlScreen) updateReload() {
 			if len(r.touched) > 0 || len(r.presets) > 0 || r.draft.controls != 0 {
 				s.applyDraft(g, r.draft, r.touched, r.presets)
 				s.draft = s.freshDraft(g)
+				s.retainLanguageChoice(g)
 			}
 			s.toast, s.toastLeft = "Now playing "+r.name, 2.5
 			return

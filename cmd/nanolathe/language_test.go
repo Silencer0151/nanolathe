@@ -127,7 +127,49 @@ func TestUntouchedLanguageKeepsPendingChinese(t *testing.T) {
 	s.touched["unitlimit"] = true
 	s.draft.unitLimit = 500
 	s.apply()
-	if g.language != "chinese" || g.languagePending != "chinese" || s.touched["language"] {
+	if g.language != "chinese" || g.languagePending != "chinese" || s.draft.language != languageCodeIndex("chinese") {
 		t.Fatal("an unrelated Apply replaced the pending language")
+	}
+}
+
+// Content reloads and newly opened settings may have rebuilt their draft
+// before a download settles. Failure must leave a real retry, while success
+// must not leave an old-language change staged against the new active one.
+func TestChineseCompletionAfterDraftRebind(t *testing.T) {
+	restoreEnglish(t)
+	previous := nlScreenInst
+	t.Cleanup(func() { nlScreenInst = previous })
+	for _, failed := range []bool{true, false} {
+		_ = i18n.SetLanguage(i18n.English)
+		g, s := settingsRegressionScreen(nil, settings.Defaults())
+		g.language, g.languagePending = "chinese", "chinese"
+		s.open = true
+		nlScreenInst = s
+		if failed {
+			g.completeLanguage(false, errors.New("download failed"))
+			if !s.touched["language"] || s.draft.language != languageCodeIndex("chinese") {
+				t.Fatal("rebound draft cannot retry Chinese")
+			}
+			s.apply()
+			if i18n.Language() != "chinese" {
+				t.Fatal("Apply after rebind failure did not retry")
+			}
+		} else {
+			g.completeLanguage(true, nil)
+			if s.draft.language != languageCodeIndex("chinese") {
+				t.Fatal("completion left the old language staged")
+			}
+		}
+	}
+	_ = i18n.SetLanguage(i18n.English)
+	g, s := settingsRegressionScreen(nil, settings.Defaults())
+	g.language, g.languagePending = "chinese", "chinese"
+	s.open = true
+	s.draft.language = languageCodeIndex("ukrainian")
+	s.touched["language"] = true
+	nlScreenInst = s
+	g.completeLanguage(true, nil)
+	if s.draft.language != languageCodeIndex("ukrainian") {
+		t.Fatal("completion replaced the player's newer draft choice")
 	}
 }
