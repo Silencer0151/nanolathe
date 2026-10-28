@@ -15,6 +15,60 @@ tick, and the citation routing that names this document as the home of
 `[P0-I14]` — picking, selection and HUD commands — and, jointly with
 DESIGN_PRESENTATION_CLIENT, of `[F-P1-008]`, defined in §3.5 below.
 
+## Smart makers input assistance
+
+The Enhanced energy dropdown offers **Smart: On/Off** beside Upkeep. It is
+local input assistance in every gameplay mode, on by default in Modern and off
+by default otherwise. It is independent of Modern's activity-hold controls.
+The selection lasts for this battle, not in settings, saves or online match
+configuration. Closing the dropdown, changing the viewed player, or opening a
+menu does not change it. Original presentation does not run this assistance.
+
+The host reads only committed frames and immutable unit definitions. Once per
+new observed settlement of its own human player, it uses whole-energy integer
+arithmetic to turn makers on at or above 80% storage and off below 40%. The
+40–80% band makes no changes. On-budget is the pass surplus plus stock above
+80%; off-need is the pass shortfall plus the gap up to 40%. Most-efficient
+makers (authored metal made per energy used) come on first; least-efficient
+come off first, with allocation order breaking ties. Candidates are completed,
+switchable buildings with nonzero makesmetal, positive energyuse and no
+extractsmetal. Computer players, other players and observers are never managed.
+No energy storage or non-finite economy reports produce no commands.
+
+Every switch is an ordinary per-unit activation command, taking the same
+submission, identity validation, script, billing and replay-recording paths as
+a manual click. No simulation rule, catalog mark, manifest, checkpoint, save
+or online extension is added. Replays reproduce those recorded commands; the
+assistant is read-only during playback and never generates extra commands.
+Online, only the owning client's host sends them, with **one outstanding Smart
+command per client**. The next waits until the transport reports the submitted
+client sequence in an applied grant (not merely a newer world tick or a global
+stream position). Thus ten synchronized human clients contribute at most ten
+entries to the room-wide 64-entry pending queue, leaving space for human input,
+even if grants stall. Remaining decisions keep their observed budget and order,
+but are revalidated by allocation identity before submission; a newer settlement
+replaces the remainder. Offline, the full plan is submitted together. Paused
+frames never repeat a settlement's commands. Non-pausing menus do not stop Smart.
+
+Locally requested Upkeep/Generation pauses suppress new ON requests until their
+authoritative echo or rejection, without changing the committed frame. If an
+already in-flight Smart ON visits after that pause, Smart sends an ordinary OFF
+for that same allocation only after both the original command and pause have
+been applied. A successful manual activation submission retires Smart's pending
+correction and remaining plan for that allocation, without releasing its
+outstanding transport credit early. Smart does not shut down unrelated
+structures or reinterpret manual activation as its own.
+Disabling Smart or switching away from Enhanced stops new decisions and drops
+the unsent plan, but still acknowledges submitted commands and finishes their
+hold corrections. A queued Smart ON must not escape an Upkeep/Generation pause
+when the player disables assistance before that ON executes.
+An Upkeep hold suppresses the assistant; a Generation hold prevents switching
+on but still permits shedding. Manual switching lasts until a later Smart
+decision, unless Smart is disabled. Full metal storage is not an exclusion,
+matching the original controller's energy-only decision. Tests cover budgets,
+hysteresis boundaries, efficiency, exclusions, input capture/scaling, ordinary
+command dispatch, per-settlement deduplication and retail-battle captures.
+
 ## Modern economy breakdown
 
 The Enhanced presentation's metal and energy readout areas open an anchored
