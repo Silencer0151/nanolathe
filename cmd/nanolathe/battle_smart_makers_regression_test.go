@@ -10,6 +10,7 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/gameplay"
 	"github.com/nanolathe-gg/nanolathe/internal/pool"
 	"github.com/nanolathe-gg/nanolathe/internal/session"
+	"github.com/nanolathe-gg/nanolathe/internal/units"
 )
 
 type smartAckDriver struct {
@@ -218,5 +219,130 @@ func TestSmartMakerManualActivationRetiresCorrectionButNotTransportCredit(t *tes
 	b.serviceSmartMakers()
 	if len(d.commands) != 3 {
 		t.Fatal("Smart undid a manual ON under the hold")
+	}
+}
+
+func TestSmartMakerPausedOnRespectsUpkeepAfterStoppingAssistance(t *testing.T) {
+	for _, stop := range []string{"enabled", "off", "original"} {
+		t.Run(stop, func(t *testing.T) {
+			b, cl := economyPanelFixture(t)
+			b.cl = cl
+			b.sess.Econ = &economy.Service{}
+			b.sess.Econ.Players[0] = economy.Player{Exists: true, ControllerState: 1,
+				EndGameCountdown: -1, UpdateTime: ^uint32(0)}
+			b.sess.BindRules(session.ModernRuleSet())
+			d := b.cat.Units["armcons"]
+			d.BMCode, d.MakesMetal, d.EnergyUse, d.OnOffable = 0, 1, 60, true
+			for _, u := range b.sess.Units.IterSliced() {
+				if u != nil {
+					u.Remaining = 0
+					u.Flags |= units.BuildingClassStatus
+					u.SetActivationEdge(false)
+				}
+			}
+			step := func() { b.sess.Step(b.sess.Clock.ScaledAnchor + 1) }
+			step()
+			f, _ := b.currentSnapshot()
+			f.Economy = []frame.EconomyView{{Player: 0, Active: true, Energy: 1000, EnergyCapacity: 1000, ActivityTick: 30}}
+			b.serviceSmartMakers()
+			if len(b.sess.PendingHumanCommands()) == 0 {
+				t.Fatal("missing Smart ON")
+			}
+			// The real paused-input boundary accepts ON without pumping its
+			// order. Upkeep subsequently sees an OFF maker and cannot stop it.
+			b.sess.Clock.Paused = true
+			step()
+			f, _ = b.currentSnapshot()
+			if stop == "off" {
+				b.economyPanel.resource = economy.Energy
+				b.activateEconomyPanel(f, economyPanelHit{kind: 6, held: true})
+			} else if stop == "original" {
+				cl.SetEnhanced(false)
+			}
+			if err := b.enqueueHumanCommand(session.HumanCommand{Kind: session.HumanEconomyActivity,
+				EconomyActivity: session.HumanEconomyActivityCommand{Activity: economy.ActivityUpkeep, Pause: true}}); err != nil {
+				t.Fatal(err)
+			}
+			step()
+			if !b.sess.Econ.ActivityHeld(0, economy.ActivityUpkeep) {
+				t.Fatal("Upkeep pause was not applied")
+			}
+			b.sess.Clock.Paused = false
+			step()
+			b.serviceSmartMakers()
+			step()
+			for _, u := range b.sess.Units.IterSliced() {
+				if u != nil && u.Activated {
+					t.Fatal("submitted Smart ON escaped the Upkeep pause")
+				}
+			}
+		})
+	}
+}
+
+func TestSmartMakerStoppedAssistanceStillPacesHoldCorrection(t *testing.T) {
+	for _, stop := range []string{"off", "original"} {
+		t.Run(stop, func(t *testing.T) {
+			b, cl, f := smartServiceFixture(t)
+			d := &smartAckDriver{}
+			b.multiplayer = &battleMultiplayer{driver: d}
+			b.serviceSmartMakers()
+			if err := b.enqueueHumanCommand(session.HumanCommand{Kind: session.HumanEconomyActivity,
+				EconomyActivity: session.HumanEconomyActivityCommand{Activity: economy.ActivityGeneration, Pause: true}}); err != nil {
+				t.Fatal(err)
+			}
+			if stop == "off" {
+				b.economyPanel.resource = economy.Energy
+				b.activateEconomyPanel(f, economyPanelHit{kind: 6, held: true})
+			} else {
+				cl.SetEnhanced(false)
+			}
+			f.Tick++
+			f.Units[0].Activated, d.applied = true, 1
+			b.serviceSmartMakers()
+			if len(d.commands) != 2 {
+				t.Fatal("corrected ON before the pause's grant")
+			}
+			f.EconomyHolds = []frame.EconomyHoldView{{Kind: uint8(economy.ActivityGeneration)}}
+			d.applied = 2
+			b.serviceSmartMakers()
+			if len(d.commands) != 3 || d.commands[2].Kind != session.HumanActivation || d.commands[2].Activation.Activate {
+				t.Fatal("stopped assistance abandoned its pending hold correction")
+			}
+			for range 10 {
+				f.Tick++
+				f.Economy[0].ActivityTick++
+				b.serviceSmartMakers()
+			}
+			if len(d.commands) != 3 {
+				t.Fatal("repeated an unacknowledged correction")
+			}
+			f.Units[0].Activated, d.applied, f.EconomyHolds = false, 3, nil
+			b.serviceSmartMakers()
+			if len(d.commands) != 3 || len(b.smartMakers.pending) != 0 || len(b.smartMakers.plan) != 0 {
+				t.Fatal("stopped assistance retained pending work or planned a fresh ON")
+			}
+		})
+	}
+}
+
+func TestSmartMakerRendererSwitchDoesNotRepeatSettlementBudget(t *testing.T) {
+	b, cl, f := smartServiceFixture(t)
+	b.cat.Units["testmaker"].EnergyUse = 150 // the 200-energy budget buys one maker
+	f.Units[1].DefName, f.Units[1].Activated = "testmaker", false
+	d := &smartAckDriver{}
+	b.multiplayer = &battleMultiplayer{driver: d}
+	b.serviceSmartMakers()
+	if len(d.commands) != 1 {
+		t.Fatal("missing initial ON")
+	}
+	f.Tick++
+	f.Units[0].Activated, d.applied = true, 1
+	cl.SetEnhanced(false)
+	b.serviceSmartMakers()
+	cl.SetEnhanced(true)
+	b.serviceSmartMakers()
+	if len(d.commands) != 1 {
+		t.Fatal("renderer switch spent the same settlement's budget twice")
 	}
 }

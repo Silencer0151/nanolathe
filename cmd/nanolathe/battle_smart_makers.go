@@ -191,9 +191,10 @@ func (b *battleSession) smartMakerHoldPending(index int) bool {
 	return h.active && h.pause
 }
 func (b *battleSession) serviceSmartMakers() {
-	if b == nil || b.cl == nil || !b.cl.Enhanced() || !b.smartMakersEnabled() {
+	if b == nil || b.cl == nil {
 		return
 	}
+	planning := b.cl.Enhanced() && b.smartMakersEnabled()
 	f, ok := b.currentSnapshot()
 	if !ok || !b.smartMakersCanControl(f) || b.sess.Clock == nil || b.sess.Clock.Paused {
 		return
@@ -225,15 +226,23 @@ func (b *battleSession) serviceSmartMakers() {
 		s.pending = nil
 		s.overridden = nil
 	}
-	for _, e := range f.Economy {
-		if e.Player != f.ViewingPlayer || !e.Active || e.ActivityTick == 0 {
-			continue
+	if planning {
+		for _, e := range f.Economy {
+			if e.Player != f.ViewingPlayer || !e.Active || e.ActivityTick == 0 {
+				continue
+			}
+			if !s.observed || s.lastPass != e.ActivityTick {
+				s.observed, s.lastPass = true, e.ActivityTick
+				s.plan = smartMakerPlan(f, b.cat, e)
+			}
+			break
 		}
-		if !s.observed || s.lastPass != e.ActivityTick {
-			s.observed, s.lastPass = true, e.ActivityTick
-			s.plan = smartMakerPlan(f, b.cat, e)
-		}
-		break
+	} else {
+		// Disabling new decisions cannot withdraw an ON already submitted.
+		// Finish its hold correction through the ordinary command path even
+		// after switching presentation (DESIGN_INTERFACE_HUD_INPUT "Smart
+		// makers input assistance"). Discard the remaining budget instead.
+		s.plan = nil
 	}
 	if upkeepHeld {
 		s.plan = nil

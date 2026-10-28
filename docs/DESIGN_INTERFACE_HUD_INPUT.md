@@ -58,6 +58,10 @@ been applied. A successful manual activation submission retires Smart's pending
 correction and remaining plan for that allocation, without releasing its
 outstanding transport credit early. Smart does not shut down unrelated
 structures or reinterpret manual activation as its own.
+Disabling Smart or switching away from Enhanced stops new decisions and drops
+the unsent plan, but still acknowledges submitted commands and finishes their
+hold corrections. A queued Smart ON must not escape an Upkeep/Generation pause
+when the player disables assistance before that ON executes.
 An Upkeep hold suppresses the assistant; a Generation hold prevents switching
 on but still permits shedding. Manual switching lasts until a later Smart
 decision, unless Smart is disabled. Full metal storage is not an exclusion,
