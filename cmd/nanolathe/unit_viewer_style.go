@@ -176,9 +176,7 @@ func (s *toolsScreen) label(dst *ebiten.Image, text string, r screenkit.Rect, st
 // mount after decoding: the detached images and GAF records retain no archive
 // reader, so closing the viewer has no content-lifetime work to postpone.
 func (s *toolsScreen) preparePaint() {
-	if s.fonts.Display == nil {
-		s.fonts = screenkit.LoadFonts()
-	}
+	s.fonts = s.fonts.Refresh()
 	if s.art != nil {
 		return
 	}

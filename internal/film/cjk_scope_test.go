@@ -1,11 +1,14 @@
 package film
 
-import "testing"
+import (
+	"errors"
+	"testing"
+)
 
 // The base atlases carry Latin and Cyrillic only: a build that never selects
 // Chinese must not hold a Han glyph, or every player pays for the atlas.
 func TestBaseFaceHasNoHanGlyphs(t *testing.T) {
-	face := textFace("display")
+	face := filmFaces()["display"]
 	if _, r := face.glyph('选'); r != ' ' {
 		t.Fatalf("the base face resolves 选 to %q, want the space fallback", r)
 	}
@@ -29,5 +32,42 @@ func TestCJKFaceAddsHanGlyphs(t *testing.T) {
 	}
 	if merged.Glyphs["A"] != latin {
 		t.Fatal("the merged face replaced a Latin glyph instead of keeping the base entry")
+	}
+}
+
+// A repeated selection shares the in-flight request; failure makes the next
+// explicit selection a retry instead of permanently hiding its glyphs.
+func TestCJKRequestDeduplicatesAndRetries(t *testing.T) {
+	enabled, ready, failure, start := cjkEnabled.Load(), cjkReady.Load(), cjkFailure.Load(), startCJKFetch
+	t.Cleanup(func() {
+		cjkEnabled.Store(enabled)
+		cjkReady.Store(ready)
+		cjkFailure.Store(failure)
+		startCJKFetch = start
+	})
+	cjkEnabled.Store(false)
+	cjkReady.Store(false)
+	cjkFailure.Store(nil)
+	calls := 0
+	startCJKFetch = func() { calls++ }
+	EnableCJK()
+	EnableCJK()
+	if calls != 1 || CJKReady() {
+		t.Fatalf("in flight: requests=%d ready=%v", calls, CJKReady())
+	}
+	err := errors.New("download failed")
+	cjkFailure.Store(&err)
+	cjkEnabled.Store(false)
+	if CJKError() == nil {
+		t.Fatal("download failure was lost")
+	}
+	EnableCJK()
+	if calls != 2 || CJKError() != nil {
+		t.Fatalf("retry: requests=%d failure=%v", calls, CJKError())
+	}
+	cjkReady.Store(true)
+	EnableCJK()
+	if calls != 2 || !CJKReady() {
+		t.Fatalf("complete: requests=%d ready=%v", calls, CJKReady())
 	}
 }

@@ -24,7 +24,18 @@ var (
 // cjkAssets are the four files the host delivers, in any order.
 var cjkAssets = []string{"display-cjk.png", "display-cjk.json", "body-cjk.png", "body-cjk.json"}
 
+func failCJK(err error) {
+	cjkFailure.Store(&err)
+	cjkEnabled.Store(false)
+}
+
 func init() {
+	js.Global().Set("nanolatheFilmCJKFailed", js.FuncOf(func(_ js.Value, args []js.Value) any {
+		if len(args) == 1 && args[0].Type() == js.TypeString {
+			failCJK(errors.New(args[0].String()))
+		}
+		return nil
+	}))
 	js.Global().Set("nanolatheFilmCJKReady", js.FuncOf(func(_ js.Value, args []js.Value) any {
 		if len(args) != 2 || args[0].Type() != js.TypeString {
 			return nil
@@ -52,6 +63,8 @@ func init() {
 		loader := js.Global().Get("nanolatheFilmLoadCJK")
 		if loader.Type() == js.TypeFunction {
 			loader.Invoke()
+		} else {
+			failCJK(errors.New("browser font loader is unavailable"))
 		}
 	}
 }

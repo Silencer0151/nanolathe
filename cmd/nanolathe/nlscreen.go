@@ -14,8 +14,8 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/camera"
 	"github.com/nanolathe-gg/nanolathe/internal/client"
 	"github.com/nanolathe-gg/nanolathe/internal/content"
-	"github.com/nanolathe-gg/nanolathe/internal/gameplay"
 	"github.com/nanolathe-gg/nanolathe/internal/film"
+	"github.com/nanolathe-gg/nanolathe/internal/gameplay"
 	"github.com/nanolathe-gg/nanolathe/internal/i18n"
 	"github.com/nanolathe-gg/nanolathe/internal/input"
 	"github.com/nanolathe-gg/nanolathe/internal/modlibrary"
@@ -43,9 +43,6 @@ type nlScreen struct {
 	closing       bool // closed, waiting for the closing gesture to be released
 	ready         bool
 	fonts         screenkit.Fonts
-	// cjkFaces records whether fonts carries the Chinese atlases, so the faces
-	// are rebuilt once when a browser build's fetch lands, not every frame.
-	cjkFaces bool
 	art           *nlArt
 	pointer       *client.Cursors
 	pointerCS     *contentSet
@@ -202,6 +199,9 @@ func (s *nlScreen) warm(g *gameShell) {
 	if s == nil || s.open || s.reload != nil || g == nil || g.cs == nil {
 		return
 	}
+	if s.ready {
+		s.fonts = s.fonts.Refresh()
+	}
 	if s.warmed == g {
 		s.tendMenuPictures(g)
 		return
@@ -218,15 +218,7 @@ func (s *nlScreen) warm(g *gameShell) {
 	if !s.ready {
 		s.fonts = screenkit.LoadFonts()
 		s.art = loadNLArt(s.baseFS)
-		s.cjkFaces = film.CJKReady()
 		s.ready = true
-	}
-	// A language may bring glyphs of its own: the Chinese atlases are decoded
-	// when it is selected, and a browser build fetches them, so the faces are
-	// rebuilt when they become available rather than when the card is applied.
-	if ready := film.CJKReady(); ready != s.cjkFaces {
-		s.fonts = screenkit.LoadFonts()
-		s.cjkFaces = ready
 	}
 	// The canvas the screen will open at: the window, or the display in
 	// fullscreen, in device pixels.
@@ -551,9 +543,21 @@ func (s *nlScreen) apply() {
 		g.playMenuCue("BigButton")
 		return
 	}
+	language := s.draft.language
+	languageTouched := s.touched["language"]
 	s.applyDraft(g, s.draft, s.touched, s.pendingPresets)
 	s.draft = s.freshDraft(g)
 	s.toast, s.toastLeft = "Settings saved", 2.2
+	if languageTouched && g.requestedLanguage() == "chinese" && i18n.Language() != "chinese" {
+		// Keep the requested choice unapplied until its fonts arrive, so the
+		// same Apply button can retry a failed optional download.
+		s.draft.language = language
+		s.touched["language"] = true
+		s.toast, s.toastLeft = "Loading Chinese fonts...", 6
+		if film.CJKError() != nil {
+			s.toast = "Chinese fonts could not load. Apply to retry."
+		}
+	}
 	g.playMenuCue("BigButton")
 }
 
@@ -632,7 +636,9 @@ func (s *nlScreen) applyDraft(g *gameShell, draft nlDraft, touched map[string]bo
 		g.fullscreen = next.fullscreen
 		ebiten.SetFullscreen(next.fullscreen)
 	}
-	g.chooseLanguage(next.language)
+	if touched["language"] {
+		g.chooseLanguage(next.language)
+	}
 	g.display.Width, g.display.Height = next.resolution.W, next.resolution.H
 	g.commitWindowSize()
 	g.saveSettings()
@@ -923,6 +929,7 @@ func (s *nlScreen) Draw(screen *ebiten.Image) {
 		s.art = loadNLArt(s.baseFS)
 		s.ready = true
 	}
+	s.fonts = s.fonts.Refresh()
 	b := screen.Bounds()
 	nlScreenW, nlScreenH = float64(b.Dx()), float64(b.Dy())
 	u := s.u()

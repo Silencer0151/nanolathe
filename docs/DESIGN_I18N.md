@@ -68,14 +68,25 @@ the layout gives way:
 ## Fonts
 
 The film faces (Barlow) have no Cyrillic or Han. `tools/film-font-cyrillic`
-appends Cyrillic glyphs from Fira Sans to the atlases, scaled to Barlow's cap
-height. `tools/film-font-cjk` appends the full-width characters a catalog
-uses from Noto Sans SC, rasterized at about half the Latin resolution: each
-such glyph carries a `scale` (face units per atlas texel) that the film
-rasterizer and `screenkit` apply to its size, border and mip choice. Both
-tools leave the glyphs already in the atlas byte for byte;
-`internal/film/assets/README.md` records the sources. Every glyph is loaded
-whatever the running language.
+appends Cyrillic glyphs from Fira Sans to the shared atlases, scaled to
+Barlow's cap height. `tools/film-font-cjk` writes the full-width characters
+a catalog uses from Noto Sans SC into separate `display-cjk` and `body-cjk`
+atlases, leaving the shared pair unchanged. These glyphs are rasterized at
+about half the Latin resolution: each carries a `scale` (face units per atlas
+texel) that the film rasterizer and `screenkit` apply to its size, border and
+mip choice. `internal/film/assets/README.md` records the pinned source,
+tool versions and reproduction command.
+
+The executable embeds the optional pair and decodes it on the first Chinese
+selection. The browser fetches it on demand from the current host build's
+content-addressed assets, verifies all four files, and delivers them together.
+English and Ukrainian never request or decode these additions. While a fetch
+runs, the previous language stays active. A failure leaves that interface
+readable and the Chinese choice available for another Apply; the saved choice
+is retained for the next launch too. Choosing another language cancels pending
+activation. Successful completion activates Chinese on a host step, and every
+screen refreshes its retained fonts before drawing. Loaded glyphs are kept for
+the rest of the process; ordinary draws do not upload them again.
 
 ## Choosing the language
 
@@ -83,16 +94,18 @@ whatever the running language.
 - `--language <code>` overrides it for one run.
 - The Language card on the Game page changes the setting on Apply. Each
   language is named and described in its own words, so a player who cannot
-  read the running language can still find theirs.
+  read the running language can still find theirs. Chinese is labelled in
+  English until its optional glyphs are available.
 
 ## Adding a language
 
 1. Add `internal/i18n/locales/<code>.json`, mapping the screen's English to
    the language. A partial catalog works: missing entries stay English.
 2. Add the code and the language's own name for itself to `i18n.Languages`.
-3. If the language needs letters the film faces lack, append them to the
-   atlases as `tools/film-font-cyrillic` does for Cyrillic and
-   `tools/film-font-cjk` for Chinese.
+3. If the language needs letters the film faces lack, provide them as
+   `tools/film-font-cyrillic` does for Cyrillic or in an optional atlas as
+   `tools/film-font-cjk` does for Chinese. Keep the optional download paired
+   with the browser host build (DESIGN_BROWSER_HOST §4 contract 7).
 
 ## Scope
 

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"io"
 	"testing"
 
@@ -80,5 +81,53 @@ func TestKeptTextFollowsTheLanguage(t *testing.T) {
 	}
 	if got := c.upperCase("Back"); got != "НАЗАД" {
 		t.Fatalf("Ukrainian capitals %q", got)
+	}
+}
+
+// An asynchronous font request must not activate text that the current face
+// cannot draw; failures retain a readable language and an explicit retry.
+func TestChineseLanguageWaitsForFontsAndCanRetry(t *testing.T) {
+	restoreEnglish(t)
+	_ = i18n.SetLanguage(i18n.English)
+	g := &gameShell{language: "chinese", languagePending: "chinese"}
+	g.completeLanguage(false, nil)
+	if i18n.Language() != i18n.English || g.languagePending != "chinese" {
+		t.Fatal("a pending download changed the interface")
+	}
+	g.completeLanguage(false, errors.New("download failed"))
+	if i18n.Language() != i18n.English || g.languagePending != "" || g.language != "chinese" {
+		t.Fatal("failure lost the readable interface or saved choice")
+	}
+	g.chooseLanguage(2)
+	if i18n.Language() != "chinese" || g.languagePending != "" {
+		t.Fatal("selecting Chinese after failure did not retry and activate the available fonts")
+	}
+}
+
+// Applying the previous language while Chinese is pending cancels activation,
+// even though that language is still the one currently being drawn.
+func TestPendingChineseCanBeCancelled(t *testing.T) {
+	restoreEnglish(t)
+	_ = i18n.SetLanguage(i18n.English)
+	g := &gameShell{language: "chinese", languagePending: "chinese"}
+	g.chooseLanguage(0)
+	g.completeLanguage(true, nil)
+	if i18n.Language() != i18n.English || g.languagePending != "" || g.language != "" {
+		t.Fatal("cancelled Chinese activated after the download completed")
+	}
+}
+
+// Reopening settings while optional fonts load must not turn an unrelated
+// Apply into an English selection or cancel the saved Chinese request.
+func TestUntouchedLanguageKeepsPendingChinese(t *testing.T) {
+	restoreEnglish(t)
+	_ = i18n.SetLanguage(i18n.English)
+	g, s := settingsRegressionScreen(nil, settings.Defaults())
+	g.language, g.languagePending = "chinese", "chinese"
+	s.touched["unitlimit"] = true
+	s.draft.unitLimit = 500
+	s.apply()
+	if g.language != "chinese" || g.languagePending != "chinese" || s.touched["language"] {
+		t.Fatal("an unrelated Apply replaced the pending language")
 	}
 }

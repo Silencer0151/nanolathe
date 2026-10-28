@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/nanolathe-gg/nanolathe/internal/content"
+	"github.com/nanolathe-gg/nanolathe/internal/film"
 	"github.com/nanolathe-gg/nanolathe/internal/gameplay"
 	"github.com/nanolathe-gg/nanolathe/internal/input"
 	"github.com/nanolathe-gg/nanolathe/internal/modlibrary"
@@ -136,11 +137,11 @@ func onOff(v bool) int {
 // the installed mods' names and versions, which are the Content card's steps;
 // everything else (the draft, the shell, the part a grouped card compares) is
 // read by the cards' closures when they are called. So the catalogue is
-// rebuilt when, and only when, that list differs from the one it was built
-// from (a mod installed or removed, or a content switch's re-read).
+// rebuilt when that list differs from the one it was built from, or optional
+// glyphs become available and the language card can name Chinese in Chinese.
 func (s *nlScreen) pages() []nlPage {
 	if !s.catalogue.builtFrom(s.mods) {
-		s.catalogue = nlCatalogue{pages: s.buildPages(), mods: make([]nlModName, len(s.mods))}
+		s.catalogue = nlCatalogue{pages: s.buildPages(), mods: make([]nlModName, len(s.mods)), cjk: film.CJKReady()}
 		for i, m := range s.mods {
 			s.catalogue.mods[i] = nlModName{m.Name, m.Version}
 		}
@@ -152,12 +153,13 @@ func (s *nlScreen) pages() []nlPage {
 type nlCatalogue struct {
 	pages []nlPage
 	mods  []nlModName
+	cjk   bool
 }
 
 type nlModName struct{ name, version string }
 
 func (c *nlCatalogue) builtFrom(mods []modlibrary.Mod) bool {
-	if c.pages == nil || len(c.mods) != len(mods) {
+	if c.pages == nil || len(c.mods) != len(mods) || c.cjk != film.CJKReady() {
 		return false
 	}
 	for i := range mods {

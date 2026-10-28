@@ -39,12 +39,24 @@ type fontGlyph struct {
 type Fonts struct {
 	Display *Font
 	Body    *Font
+	cjk     bool
 }
 
 // LoadFonts uploads both faces. It must run on the game goroutine after the
 // graphics device exists.
 func LoadFonts() Fonts {
-	return Fonts{Display: newFont(film.FilmTypeface("display")), Body: newFont(film.FilmTypeface("body"))}
+	ready := film.CJKReady()
+	return Fonts{Display: newFont(film.FilmTypeface("display")), Body: newFont(film.FilmTypeface("body")), cjk: ready}
+}
+
+// Refresh adopts optional glyphs when they arrive. Screens retain their faces
+// between draws, so a language download must invalidate those copies too.
+// Like LoadFonts, this runs on the game goroutine.
+func (f Fonts) Refresh() Fonts {
+	if f.Display == nil || f.Body == nil || f.cjk != film.CJKReady() {
+		return LoadFonts()
+	}
+	return f
 }
 
 func newFont(face *film.Typeface) *Font {

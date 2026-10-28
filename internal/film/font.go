@@ -103,6 +103,10 @@ var cjkEnabled atomic.Bool
 // has them the moment they are asked for; a browser build waits for its fetch.
 var cjkReady atomic.Bool
 
+// A failed optional download leaves the base faces usable. Another explicit
+// language selection clears the failure and asks the host to retry.
+var cjkFailure atomic.Pointer[error]
+
 // startCJKFetch asks the host to deliver the Chinese atlases. The executable
 // has nothing to do; the browser build replaces it with a fetch request.
 var startCJKFetch = func() {}
@@ -111,18 +115,23 @@ var startCJKFetch = func() {}
 // merges them on the next lookup; a browser build starts the fetch and merges
 // them once the bytes arrive. Calling it more than once is free.
 func EnableCJK() {
-	cjkEnabled.Store(true)
-	startCJKFetch()
+	if cjkEnabled.CompareAndSwap(false, true) {
+		cjkFailure.Store(nil)
+		startCJKFetch()
+	}
 }
-
-// CJKEnabled reports whether the Chinese atlases have been requested. Text that
-// names Chinese in Chinese itself must fall back to a Latin spelling while they
-// are not available, or the language card would be blank.
-func CJKEnabled() bool { return cjkEnabled.Load() }
 
 // CJKReady reports whether the Chinese glyphs can be drawn yet. A host that has
 // to fetch them is not ready the moment it is asked.
 func CJKReady() bool { return cjkEnabled.Load() && cjkReady.Load() }
+
+// CJKError reports an optional download failure, cleared by the next request.
+func CJKError() error {
+	if err := cjkFailure.Load(); err != nil {
+		return *err
+	}
+	return nil
+}
 
 // cjkFaces is the base pair with the Chinese additions merged in, built once
 // on first use. The CJK atlas carries every glyph it draws, so a key already
