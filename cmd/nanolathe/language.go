@@ -129,7 +129,6 @@ func languageCodeIndex(code string) int {
 func (s *nlScreen) retainLanguageChoice(g *gameShell) {
 	if g.requestedLanguage() == "chinese" && i18n.Language() != "chinese" && !s.touched["language"] {
 		s.draft.language = languageCodeIndex("chinese")
-		s.touched["language"] = true
 	}
 }
 

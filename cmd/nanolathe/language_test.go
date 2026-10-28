@@ -127,7 +127,7 @@ func TestUntouchedLanguageKeepsPendingChinese(t *testing.T) {
 	s.touched["unitlimit"] = true
 	s.draft.unitLimit = 500
 	s.apply()
-	if g.language != "chinese" || g.languagePending != "chinese" || s.draft.language != languageCodeIndex("chinese") {
+	if g.language != "chinese" || (g.languagePending != "chinese" && i18n.Language() != "chinese") || s.draft.language != languageCodeIndex("chinese") {
 		t.Fatal("an unrelated Apply replaced the pending language")
 	}
 }
@@ -147,7 +147,7 @@ func TestChineseCompletionAfterDraftRebind(t *testing.T) {
 		nlScreenInst = s
 		if failed {
 			g.completeLanguage(false, errors.New("download failed"))
-			if !s.touched["language"] || s.draft.language != languageCodeIndex("chinese") {
+			if s.draft.language != languageCodeIndex("chinese") {
 				t.Fatal("rebound draft cannot retry Chinese")
 			}
 			s.apply()
@@ -171,5 +171,21 @@ func TestChineseCompletionAfterDraftRebind(t *testing.T) {
 	g.completeLanguage(true, nil)
 	if s.draft.language != languageCodeIndex("ukrainian") {
 		t.Fatal("completion replaced the player's newer draft choice")
+	}
+}
+
+// A request staged only to offer Apply as a retry must not promote a one-run
+// language flag into the saved preference when another card is applied.
+func TestPendingChineseFlagKeepsItsOneRunScope(t *testing.T) {
+	restoreEnglish(t)
+	_ = i18n.SetLanguage(i18n.English)
+	g, s := settingsRegressionScreen(nil, settings.Defaults())
+	g.opts.Language, g.languagePending = "chinese", "chinese"
+	s.retainLanguageChoice(g)
+	s.touched["unitlimit"] = true
+	s.draft.unitLimit = 500
+	s.apply()
+	if g.opts.Language != "chinese" || g.captureSettings().Language != "" || i18n.Language() != "chinese" {
+		t.Fatalf("retry promoted the flag: flag=%q saved=%q running=%q", g.opts.Language, g.captureSettings().Language, i18n.Language())
 	}
 }

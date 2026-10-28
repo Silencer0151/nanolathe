@@ -634,6 +634,10 @@ func (s *nlScreen) applyDraft(g *gameShell, draft nlDraft, touched map[string]bo
 	}
 	if touched["language"] {
 		g.chooseLanguage(next.language)
+	} else if g.requestedLanguage() == "chinese" && i18n.Language() != "chinese" {
+		// Retrying an existing request is not a language edit: in particular,
+		// a --language override must keep its one-run scope (DESIGN_I18N).
+		g.applyLanguage()
 	}
 	g.display.Width, g.display.Height = next.resolution.W, next.resolution.H
 	g.commitWindowSize()
