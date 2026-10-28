@@ -1,7 +1,9 @@
 package main
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"math"
 	"sync/atomic"
 
@@ -260,8 +262,12 @@ func (g *gameShell) loadRetailSavePath(path string) error {
 		if modPlan, err = g.planSidecarMod(sidecar); err != nil {
 			return err
 		}
-		if modPlan.addons, err = g.planSidecarAddons(sidecar); err != nil {
-			return err
+		// A continued online replay's room content names its own add-ons,
+		// mounted beside the base install below (DESIGN_MULTIPLAYER §10.1).
+		if sidecar.OnlineReplay == nil {
+			if modPlan.addons, err = g.planSidecarAddons(sidecar); err != nil {
+				return err
+			}
 		}
 		if selection, err = resolveSidecarSelection(sidecar); err != nil {
 			return err
@@ -332,6 +338,34 @@ func (g *gameShell) loadRetailSavePath(path string) error {
 			return err
 		}
 	}
+	// A continued online replay loads as an offline skirmish on the room's
+	// content, keeping its computers' own difficulties and its team sight in
+	// every mode (DESIGN_MULTIPLAYER §10.1); a room on a generated map mounts
+	// that map with it (DESIGN_MAP_GENERATOR §10). The mount lives as long as
+	// the battle; until the battle holds it, a failure releases it.
+	var roomContent io.Closer
+	defer func() {
+		if roomContent != nil {
+			_ = roomContent.Close()
+		}
+	}()
+	if origin := sidecar.OnlineReplay; hasSidecar && origin != nil {
+		deps.ContinuedOnline = true
+		deps.AlliedSight = deps.AlliedSight || origin.SharedSight
+		for _, d := range origin.Difficulty {
+			deps.SeatDifficulties = append(deps.SeatDifficulties, session.SeatDifficulty{Player: d.Player, Difficulty: d.Difficulty})
+		}
+		if len(origin.Content) != 0 {
+			mounted, view, err := mountRoomContent(g.cs, roomContentOf(origin), sidecar.GeneratedMap)
+			var missing *roomContentMissingError
+			if errors.As(err, &missing) {
+				return refuseLoad("This game needs %s from its online room, which this install does not have", joinNames(roomContentNames(missing.missing)))
+			} else if err != nil {
+				return err
+			}
+			roomContent, deps.FS = mounted, view
+		}
+	}
 	loaded, err := session.LoadRetailSavePath(path, deps)
 	if err != nil {
 		return err
@@ -385,6 +419,11 @@ func (g *gameShell) loadRetailSavePath(path string) error {
 		return err
 	}
 	battle.survivalBest = survivalBest
+	if hasSidecar && sidecar.OnlineReplay != nil {
+		origin := *sidecar.OnlineReplay
+		battle.onlineOrigin, battle.roomContent = &origin, roomContent
+		roomContent = nil
+	}
 	// A restored save adopts on the render thread with no loader goroutine,
 	// so the remaster runs inline here and the restore blocks on it. The cache
 	// makes that a file read for any map loaded before; a cold cache costs the

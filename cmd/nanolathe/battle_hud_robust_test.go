@@ -182,7 +182,7 @@ func TestMissingMandatoryFailsBeforeClientWithDiagnostic(t *testing.T) {
 	}
 	pal := retailPaletteForTest(t, cs)
 	// Determine mandatory font logical path for this side.
-	side, err := battleSide(cs.fs, sess, sess.Catalog, nil)
+	side, err := battleSideForOwner(cs.fs, sess, sess.Catalog, nil, sess.LocalOwner)
 	if err != nil {
 		t.Fatalf("battleSide: %v", err)
 	}

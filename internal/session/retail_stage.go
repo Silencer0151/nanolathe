@@ -89,6 +89,23 @@ type RetailLoadDeps struct {
 	// alliance table before any unit publishes coverage. A campaign bank
 	// takes none.
 	AlliedSight bool
+	// ContinuedOnline marks the offline save of a continued online replay
+	// (docs/DESIGN_MULTIPLAYER.md §10.1). Its AlliedSight is the room's team
+	// sight, which the restored skirmish keeps in every gameplay mode, Strict
+	// 3.1 included, and its SeatDifficulties are the room's.
+	ContinuedOnline bool
+	// SeatDifficulties are the computer seats' own difficulty words a
+	// continued online replay's room gave them when they differed
+	// (SkirmishConfig.SeatDifficulty, docs/DESIGN_MULTIPLAYER.md §6.6). The
+	// restored seats read them in place of the Summary's battle word.
+	SeatDifficulties []SeatDifficulty
+}
+
+// SeatDifficulty is one computer seat's own difficulty word, 0 easy to 2
+// hard.
+type SeatDifficulty struct {
+	Player     uint8
+	Difficulty int
 }
 
 // RetailBattleStage is an unreachable, fully detached staging result. The
@@ -325,7 +342,7 @@ func StageRetailBattle(bank *save.Bank, deps RetailLoadDeps) (*RetailBattleStage
 	}
 	// The saved battle's vision teams, from the alliance rows the player
 	// records just restored, before the restored units publish coverage.
-	if deps.AlliedSight && sessionKind == sessionKindSkirmish && seatRulesOf(s.Rules).AlliedSightChoice() {
+	if deps.AlliedSight && sessionKind == sessionKindSkirmish && (seatRulesOf(s.Rules).AlliedSightChoice() || deps.ContinuedOnline) {
 		s.Skirmish.AlliedSight = true
 		s.setAlliedVisionTeams()
 	}
@@ -338,6 +355,18 @@ func StageRetailBattle(bank *save.Bank, deps RetailLoadDeps) (*RetailBattleStage
 	// step 24][08 R-SAVE-02 §11-A]. Keeping it here, ahead of
 	// the forced-slot reservation, is what makes a restored battle's planner a
 	// battle-entry planner that then meets a restored world.
+	// A continued online replay's computer seats keep the room's own
+	// difficulty words; the rows record which seats are computers so every
+	// per-seat reader finds them (sessionSeatDifficultyWord).
+	if len(deps.SeatDifficulties) != 0 && sessionKind == sessionKindSkirmish {
+		s.Skirmish.SeatDifficulty = true
+		for _, d := range deps.SeatDifficulties {
+			if int(d.Player) < len(s.Skirmish.Players) {
+				s.Skirmish.Players[d.Player].Controller = SkirmishControllerComputer
+				s.Skirmish.Players[d.Player].Difficulty = d.Difficulty
+			}
+		}
+	}
 	if err := initializeRestoredBattleAI(s, deps.FS, m, sessionKind); err != nil {
 		return nil, fmt.Errorf("session: retail restore: computer player construction: %w", err)
 	}

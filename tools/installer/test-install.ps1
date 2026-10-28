@@ -41,17 +41,14 @@ function New-Release([string]$Tag, [bool]$Prerelease, [string[]]$Assets, [bool]$
     }
 }
 $complete = @('Nanolathe-Setup.exe', 'SHA256SUMS', 'build.json')
-$oldStable = New-Release 'v0.3.0' $false @()
+$stable = New-Release 'v0.4.0' $false $complete
 $listing = @(
     (New-Release 'native-12' $true $complete), (New-Release 'native-14' $true @('SHA256SUMS')),
     (New-Release 'native-15' $true $complete $true), (New-Release 'native-9' $true $complete),
-    (New-Release 'browser-20' $true @('SHA256SUMS')), $oldStable
+    (New-Release 'browser-20' $true @('SHA256SUMS')), $stable
 )
-Assert-Equal (Select-NanolatheRelease $oldStable $listing).tag_name 'native-12' 'Latest when Stable has no launcher; incomplete and draft releases skipped'
-Assert-Equal (Select-NanolatheRelease $null $listing).tag_name 'native-12' 'Latest when GitHub has no latest release'
-$stable = New-Release 'v0.4.0' $false $complete
-Assert-Equal (Select-NanolatheRelease $stable $listing).tag_name 'v0.4.0' 'Stable when it carries the launcher'
-Assert-Throws { Select-NanolatheRelease $oldStable @($oldStable) } 'no release carries the launcher'
+Assert-Equal (Select-NanolatheRelease $listing).tag_name 'native-12' 'Latest even beside a Stable release; incomplete and draft releases skipped'
+Assert-Throws { Select-NanolatheRelease @($stable, (New-Release 'native-3' $true @('SHA256SUMS'))) } 'no Latest release carries the launcher'
 Assert-Equal (Get-NanolatheAssetUrl $stable 'SHA256SUMS') 'https://example.invalid/v0.4.0/SHA256SUMS' 'Asset URL'
 $plain = New-Release 'native-1' $true @('SHA256SUMS')
 $plain.assets[0].browser_download_url = 'http://example.invalid/SHA256SUMS'
@@ -84,7 +81,6 @@ try {
     function Get-CimInstance { [pscustomobject]@{ Architecture = 9 } }
     function Get-NanolatheJson([string]$Url) {
         $run.Requests += $Url
-        if ($Url.EndsWith('/releases/latest')) { return $oldStable }
         return $listing
     }
     function Get-NanolatheDownload([string]$Url, [string]$Path) {
@@ -147,7 +143,7 @@ try {
             }
         } else {
             Invoke-NanolatheInstaller
-            Assert-Equal $run.Requests[0] 'https://api.github.com/repos/nanolathe-gg/nanolathe/releases/latest' "$($case.Name): asks for Stable first"
+            Assert-Equal ($run.Requests -join ' ') 'https://api.github.com/repos/nanolathe-gg/nanolathe/releases?per_page=50' "$($case.Name): reads only the release listing"
             Assert-Equal ($run.Downloads -join ' ') ('https://example.invalid/native-12/SHA256SUMS https://example.invalid/native-12/Nanolathe-Setup.exe') "$($case.Name): downloads the checksums, then the launcher"
             Assert-Equal ([IO.File]::ReadAllText($launcherPath)) 'authored launcher' "$($case.Name): installs the launcher"
             Assert-Equal $run.Updates 1 "$($case.Name): the launcher installs the game once"

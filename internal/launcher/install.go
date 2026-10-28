@@ -33,6 +33,8 @@ type Installed struct {
 	// Version is the build's version, or the source revision's short form
 	// for a source-installer build.
 	Version string
+	// Revision is the build's full source revision, "" when unknown.
+	Revision string
 }
 
 // Selected describes the selected release, ok false when none is installed.
@@ -48,12 +50,16 @@ func (in Install) Selected() (Installed, bool) {
 	}
 	if data, err := os.ReadFile(filepath.Join(dir, buildInfoAsset)); err == nil {
 		if info, err := parseBuildInfo(data); err == nil {
-			sel.Version = info.Version
+			sel.Version, sel.Revision = info.Version, info.Revision
 		}
 	}
-	if sel.Version == "" {
-		if rev, err := os.ReadFile(filepath.Join(dir, "source-revision")); err == nil && len(strings.TrimSpace(string(rev))) >= 12 {
-			sel.Version = "main-" + strings.TrimSpace(string(rev))[:12]
+	if data, err := os.ReadFile(filepath.Join(dir, "source-revision")); err == nil {
+		rev := strings.TrimSpace(string(data))
+		if sel.Version == "" && len(rev) >= 12 {
+			sel.Version = "main-" + rev[:12]
+		}
+		if sel.Revision == "" && revisionPattern.MatchString(rev) {
+			sel.Revision = rev
 		}
 	}
 	return sel, true
@@ -69,9 +75,11 @@ type Progress func(done, total int64)
 var unsafeName = regexp.MustCompile(`[^A-Za-z0-9._-]`)
 
 // Update installs rel for goos/goarch and selects it. Every byte is checked
-// against the release's SHA256SUMS before use, the package is unpacked into
-// a staging directory, and its game must start (--help) before the release
-// is promoted; any failure leaves the previous selection untouched. After
+// against the release's SHA256SUMS before use, a release older than the
+// installed build is refused with ErrBackward (Install.Offer), the package
+// is unpacked into a staging directory, and its game must start (--help)
+// before the release is promoted; any failure leaves the previous
+// selection untouched. After
 // promotion, releases other than the new and the previous one are pruned,
 // and the source installers' compiler and build cache are removed.
 func (in Install) Update(ctx context.Context, src Source, rel Release, goos, goarch string, progress Progress) error {
@@ -84,25 +92,16 @@ func (in Install) Update(ctx context.Context, src Source, rel Release, goos, goa
 			return err
 		}
 	}
-	sumData, err := src.small(ctx, rel, checksumsAsset)
+	rec, err := src.buildRecord(ctx, rel)
 	if err != nil {
 		return err
 	}
-	sums, err := parseChecksums(sumData)
-	if err != nil {
+	if st, err := in.standing(ctx, src, rel, &rec.info); err != nil {
 		return err
+	} else if st == Backward {
+		return ErrBackward
 	}
-	infoData, err := src.small(ctx, rel, buildInfoAsset)
-	if err != nil {
-		return err
-	}
-	if err := checkSum(sums, buildInfoAsset, sha256.Sum256(infoData)); err != nil {
-		return err
-	}
-	info, err := parseBuildInfo(infoData)
-	if err != nil {
-		return err
-	}
+	sums, infoData, info := rec.sums, rec.data, rec.info
 	name := unsafeName.ReplaceAllString(info.Version+"-"+rel.Tag, "_")
 	previous, _ := in.Current()
 	if dir := filepath.Join(releases, name); in.complete(dir, rel.Tag) {
@@ -226,12 +225,11 @@ func containsString(list []string, s string) bool {
 	return false
 }
 
-// removeSourceInstallerFiles deletes what only the source installers use:
-// their private Go toolchains, module and build caches, interrupted work
-// and stage directories, and lock. Saves, settings, logs and the remembered
-// game folder stay.
+// removeSourceInstallerFiles deletes what only the source installers use
+// (sourceInstallerFiles), with their interrupted work and stage
+// directories. Saves, settings, logs and the remembered game folder stay.
 func (in Install) removeSourceInstallerFiles() {
-	for _, name := range []string{"toolchains", "cache", "install.lock", ".install-lock"} {
+	for _, name := range sourceInstallerFiles {
 		_ = os.RemoveAll(in.Path(name))
 	}
 	entries, err := os.ReadDir(in.Base)

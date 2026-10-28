@@ -24,7 +24,9 @@ func TestModernAircraftPrefersVisibleAntiAir(t *testing.T) {
 	aa := &content.WeaponDef{ID: 91, LineOfSight: true, Range: 64, WeaponVelocity: 20 << 16, DamageDefault: 40, ReloadTime: 30}
 	far.InstallWeapon(0, aa)
 
+	// A mobile one: a turret counts every armed enemy, in range or not.
 	ground := *shooter.Def
+	ground.CanMove = true
 	shooter.Def = &ground
 	q := modernTargetQuery(s, w, terrain, shooter, near, far)
 	if got, _ := s.rules().SelectTarget(s, &q); got != near.Handle {

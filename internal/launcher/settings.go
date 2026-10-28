@@ -6,14 +6,16 @@ import (
 	"os"
 )
 
-// Channel is the stream of builds a launcher follows.
+// Channel is the stream of builds a launcher follows. Neither channel's
+// builds are signed yet, so Smart App Control can block them; signed
+// releases are planned.
 type Channel string
 
 const (
-	// Stable follows the published vX.Y.Z releases, which are code signed.
+	// Stable follows the published vX.Y.Z releases.
 	Stable Channel = "stable"
-	// Latest follows every push to main. Its builds are unsigned, so Smart
-	// App Control can block them.
+	// Latest follows every push to main. A player who has not chosen a
+	// channel follows it.
 	Latest Channel = "latest"
 )
 
@@ -26,9 +28,10 @@ type Settings struct {
 func (in Install) settingsFile() string { return in.Path("launcher.json") }
 
 // LoadSettings reads launcher.json. A missing or unreadable file gives the
-// defaults; ok reports whether the player has chosen anything yet.
+// defaults, which follow Latest; ok reports whether the player has chosen
+// anything yet.
 func (in Install) LoadSettings() (s Settings, ok bool) {
-	s = Settings{Channel: Stable}
+	s = Settings{Channel: Latest}
 	data, err := os.ReadFile(in.settingsFile())
 	if err != nil {
 		return s, false

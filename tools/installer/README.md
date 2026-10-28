@@ -23,11 +23,11 @@ or in PowerShell:
 & ([scriptblock]::Create((irm https://nanolathe.gg/install.ps1)))
 ```
 
-The PowerShell command finds the newest published release (Stable when one
-carries the launcher, otherwise Latest), downloads `Nanolathe-Setup.exe`,
-checks it against the release's `SHA256SUMS`, installs it as
-`nanolathe-launcher.exe`, and runs it windowless (`--update`) to install the
-game and the Start Menu shortcut. It then opens the launcher, which keeps the
+The PowerShell command finds the newest Latest release, downloads
+`Nanolathe-Setup.exe`, checks it against the release's `SHA256SUMS`, installs
+it as `nanolathe-launcher.exe`, and runs it windowless (`--update`) to install
+the game from the player's channel, never moving an installed build back, and
+the Start Menu shortcut. It then opens the launcher, which keeps the
 game up to date from then on. A Windows installation made by the earlier
 source installer moves to the launcher the first time its update check offers
 **Update & play**: that runs this script, and the new release's `launch.ps1`
@@ -265,18 +265,40 @@ per-user Apps & Features entry that uninstalls through `--uninstall`, and
 starts the installed copy. An installed launcher always acts on the folder it
 runs from.
 
+Uninstalling removes the shortcuts, the Apps & Features entry and only the
+files the launcher, the source installers and the game create there: the
+launcher, `releases`, `logs`, the selection and remembered-folder files,
+`launcher.json`, `launch.ps1`, and a source installation's toolchains,
+caches, lock and work directories. Saves, `settings.json` and the Survival
+records stay unless the player asks to delete them too. Anything else in
+the folder is left alone, and the folder itself goes only once it is empty.
+
 At every start the launcher checks its channel. **Stable** is the newest
 published `vX.Y.Z` release with native assets; **Latest** is the
-highest-numbered complete `native-<n>` release. Until the first Stable
-release exists, a player who has not chosen a channel follows Latest. One
-button reads Install, Update or Play. An update downloads the platform's
-package, verifies every file against `SHA256SUMS`, unpacks it into a staging
+highest-numbered complete `native-<n>` release. A player who has not chosen
+a channel follows Latest; Stable is an explicit choice. One button reads
+Install, Update or Play. An update downloads the platform's package,
+verifies every file against `SHA256SUMS`, unpacks it into a staging
 directory, checks that the game starts (`--help`), then selects it
 atomically. The previous build is kept, older ones are pruned, and a newer
 launcher shipped in the package replaces the installed one at its next start.
-An offline or failed check leaves the installed build playable. On a PC with
-Smart App Control turned on, choosing Latest shows a warning, because Latest
-builds are unsigned.
+An offline or failed check leaves the installed build playable. No build is
+signed yet (signed releases are planned), so on a PC where Smart App Control
+is on or evaluating, the launcher warns that Windows may block the game.
+
+The launcher only moves a player forward (`internal/launcher` `Offer`).
+Before it offers or installs a release other than the installed one, it
+reads the release's verified `build.json` and asks the repository's compare
+API how the two source revisions relate
+(`compare/<installed>...<offered>?per_page=1&page=2`; the second one-commit
+page carries the status without the first page's file list, under 20 KB
+instead of up to megabytes). A release ahead of the installed build is
+offered, and one built from the same revision is up to date. One behind it
+or off its history is neither offered nor installed: after switching from
+Latest to an older Stable release, or when the newest `native-<n>` release
+is deleted, the window says the installed build is newer and is kept until
+the channel passes it. A comparison that fails offers nothing, like any
+failed check. A build with no recorded revision updates as before.
 
 The launcher finds Total Annihilation through the game's own discovery
 (`--list-installs`) and validates a folder with `--check-install`. It

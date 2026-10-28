@@ -221,10 +221,23 @@ func (b *battleSession) finishLocalInterfaceStep() {
 	b.sess.SetDeveloperMovementSubject(subject)
 }
 
-// localRef names the local player's unit in slot h of f, or reports none.
+// selectionOwner is the player whose units this client selects: the local
+// player, or in a replay playback the seat whose view is shown, so that a
+// selection made while watching carries into a takeover of that seat
+// (DESIGN_MULTIPLAYER §10.1). The full-map view selects the recorded seat's.
+func (b *battleSession) selectionOwner() uint8 {
+	if p := b.replayPlayback(); p != nil && p.perspective >= 0 && p.perspective < len(p.perspectives) {
+		if v := p.perspectives[p.perspective]; !v.FullMap {
+			return v.Seat
+		}
+	}
+	return b.sess.LocalOwner
+}
+
+// localRef names the selecting player's unit in slot h of f, or reports none.
 func (b *battleSession) localRef(f *frame.Frame, h pool.Handle) (pool.UnitRef, frame.UnitView, bool) {
 	v, ok := snapshotUnitByHandle(f, h)
-	if !ok || v.Slot == 0 || b.sess == nil || v.Owner != b.sess.LocalOwner {
+	if !ok || v.Slot == 0 || b.sess == nil || v.Owner != b.selectionOwner() {
 		return pool.UnitRef{}, frame.UnitView{}, false
 	}
 	return pool.UnitRef{Handle: v.Slot, Serial: v.AllocationSerial}, v, true
@@ -411,7 +424,7 @@ func (b *battleSession) applyLocalGroupRecall(c session.HumanGroupCommand) {
 	units := make([]hud.GroupUnit, 0, len(f.Units))
 	for i := range f.Units {
 		v := &f.Units[i]
-		if v.Slot == 0 || v.Owner != b.sess.LocalOwner {
+		if v.Slot == 0 || v.Owner != b.selectionOwner() {
 			continue
 		}
 		defID, ok := b.cat.UnitDefIndex(v.DefName)
@@ -444,7 +457,7 @@ func (b *battleSession) selectedHandlesInSlotOrder() []pool.Handle {
 	out := make([]pool.Handle, 0, b.local.SelectionCount())
 	for i := range f.Units {
 		v := &f.Units[i]
-		if b.sess != nil && v.Owner == b.sess.LocalOwner && b.local.Selected(pool.UnitRef{Handle: v.Slot, Serial: v.AllocationSerial}) {
+		if b.sess != nil && v.Owner == b.selectionOwner() && b.local.Selected(pool.UnitRef{Handle: v.Slot, Serial: v.AllocationSerial}) {
 			out = append(out, v.Slot)
 		}
 	}

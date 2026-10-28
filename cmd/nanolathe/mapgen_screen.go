@@ -98,16 +98,13 @@ func mapgenDefaultSize(players int) int {
 func mapgenSeed() uint64 { return rand.Uint64() >> 24 }
 
 // mapGeneratorAvailable reports whether Generate can open: content with the
-// standard map directories, and a picker choosing for this machine's own
-// setup — online rooms carry generated maps by recipe later (DESIGN_MAP_GENERATOR §11).
+// standard map directories. An online room's host may generate its map too,
+// which the room carries as its recipe (DESIGN_MAP_GENERATOR §10).
 func (g *gameShell) mapGeneratorAvailable() bool {
 	if g == nil || g.cs == nil || mapgenScreenInst == nil {
 		return false
 	}
-	if g.cs.config != nil && !mapLibraryLayoutSupported(g.cs.config.Content.Layout()) {
-		return false
-	}
-	return g.online == nil || !g.online.room.choosingMap
+	return g.cs.config == nil || mapLibraryLayoutSupported(g.cs.config.Content.Layout())
 }
 
 // openMapGenerator opens the panel over the map picker: the mounted

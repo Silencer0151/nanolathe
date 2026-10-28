@@ -1,0 +1,293 @@
+package session
+
+import (
+	"path/filepath"
+	"reflect"
+	"testing"
+
+	"github.com/nanolathe-gg/nanolathe/internal/ai"
+	"github.com/nanolathe-gg/nanolathe/internal/gameplay"
+	"github.com/nanolathe-gg/nanolathe/internal/orders"
+	"github.com/nanolathe-gg/nanolathe/internal/pool"
+	"github.com/nanolathe-gg/nanolathe/internal/save"
+	"github.com/nanolathe-gg/nanolathe/internal/units"
+	"github.com/nanolathe-gg/nanolathe/internal/visibility"
+)
+
+// A replay fork changes control, never reconstructs the world: the chosen
+// seat becomes the local human and the recording's other human is played by
+// the Modern AI on its existing manager, in every mode (DESIGN_MULTIPLAYER
+// §10.1).
+func TestReplayTakeoverPreservesWorldAndHandsIdleHumansToModernAI(t *testing.T) {
+	fs := replayFixtureFS(t)
+	for _, mode := range []gameplay.Mode{gameplay.Strict31, gameplay.Modern, gameplay.Community39} {
+		t.Run(string(mode), func(t *testing.T) {
+			s := replayFixtureBattle(t, fs, replayFixtureConfig(t, mode), true)
+			t.Cleanup(s.closeAIControllers)
+			for range 12 {
+				if err := s.StepRecordedPump(s.Clock.GlobalTick + 5); err != nil {
+					t.Fatal(err)
+				}
+			}
+			chosen, other := s.AI[1], s.AI[0]
+			if err := s.setAIController(chosen, ai.ControllerModern); err != nil {
+				t.Fatal(err)
+			}
+			closed := &closeCountingExt{}
+			chosen.Ext = closed
+			beforeUnits := make(map[pool.Handle]units.Unit)
+			for _, u := range s.Units.Iter() {
+				beforeUnits[u.Handle] = *u
+			}
+			beforePlayers, sim, crt := s.Econ.Players, *s.SimRNG(), *s.CrtRNG()
+			beforeClock, beforeRules := *s.Clock, s.Rules
+			beforeSum := s.UnitStateChecksum()
+			actor := replayUnits(s, 1)[0]
+			// Read-ahead must not leak an order into the continuation, and
+			// its accepted sequence must not alias a new local order.
+			if err := s.EnqueueSeatCommand(CommandStamp{Seat: 1, Tick: 61, Position: 41}, moveTo([]pool.UnitRef{s.Units.Reference(actor)}, 200)); err != nil {
+				t.Fatal(err)
+			}
+			_ = s.SetPresentationPerspective(PresentationPerspective{Override: true, RevealAll: true})
+			floor, err := s.TakeOverReplay(1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if floor != 41 || len(s.pendingHuman) != 0 || s.seatCommands.replay.recorder != nil {
+				t.Fatalf("future replay input survived: floor %d, queued %d", floor, len(s.pendingHuman))
+			}
+			if *s.SimRNG() != sim || *s.CrtRNG() != crt || *s.Clock != beforeClock || !reflect.DeepEqual(s.Rules, beforeRules) || s.UnitStateChecksum() != beforeSum {
+				t.Fatal("takeover changed the world, clock, rules or a random stream")
+			}
+			for i := range beforePlayers {
+				if s.Econ.Players[i].Stock != beforePlayers[i].Stock {
+					t.Fatalf("takeover changed player %d's resources", i)
+				}
+			}
+			for _, u := range s.Units.Iter() {
+				before, after := beforeUnits[u.Handle], *u
+				// The one local sensor bank is switched, with no extra pass
+				// or cloak deadline write. Every other unit field survives.
+				before.Flags &^= visibility.FriendlyMask | visibility.JammedBit
+				after.Flags &^= visibility.FriendlyMask | visibility.JammedBit
+				if before.Flags != after.Flags || before.Script != after.Script || before.Orders != after.Orders || before.Remaining != after.Remaining || before.RevealDeadline != after.RevealDeadline || !reflect.DeepEqual(before.Move, after.Move) {
+					t.Fatalf("unit %d lost script, order, build, movement or cloak state", u.Handle)
+				}
+			}
+			if closed.closed != 1 || s.AI[1] != chosen || s.AI[0] != other || chosen.Ext != nil || chosen.Planner != s.Rules.Planner || s.ModernAIPlayer(1) {
+				t.Fatal("takeover replaced a manager or did not stop the chosen controller")
+			}
+			// The old human is now a Modern AI computer player, paid in full,
+			// and the new human takes a human's plain credits.
+			if other.Controller != ai.ControllerModern || !s.ModernAIPlayer(0) || s.Econ.Players[0].ControllerState != 2 ||
+				!s.Econ.Players[0].FullIncome || s.Econ.Players[1].FullIncome {
+				t.Fatal("the recording's other human was not handed to the Modern AI")
+			}
+			if s.LocalOwner != 1 || s.ViewingOwner != 1 || s.Econ.Players[1].ControllerState != 1 || s.seatCommands.replay.perspective != (PresentationPerspective{}) {
+				t.Fatal("the chosen player did not acquire ordinary local control")
+			}
+			seq, err := s.EnqueueHumanCommandWithSequence(HumanCommand{Kind: HumanStop, Stop: HumanStopCommand{Handles: []pool.Handle{actor}}})
+			if err != nil || seq <= floor {
+				t.Fatalf("new command identity %d after %d: %v", seq, floor, err)
+			}
+			s.ExecuteStep(s.PrepareStep(s.Clock.ScaledAnchor + 1))
+			if q := orders.QueueOfUnit(s.Units.Unit(actor)); q != nil && q.LenPrimary() != 0 {
+				t.Fatal("the new human stop lost to recorded input or computer planning")
+			}
+			if _, err := s.TakeOverReplay(0); err == nil {
+				t.Fatal("a second takeover was accepted")
+			}
+			// Losing the old human must now be the selected player's win,
+			// rather than an ending inherited from the recorded machine.
+			s.Units.Destroy(replayUnits(s, 0)[0], 1)
+			for i := 0; i < 300 && !s.GetResult().Ended; i++ {
+				s.ExecuteStep(s.PrepareStep(s.Clock.ScaledAnchor + 1))
+			}
+			if result := s.GetResult(); !result.Ended || result.Kind != "victory" || s.LocalOwner != 1 {
+				t.Fatalf("the selected player's victory did not end locally: %+v", result)
+			}
+		})
+	}
+}
+
+func TestReplayTakeoverPinsSelectedHumanAndRejectsUnplayableSeats(t *testing.T) {
+	f := newSeatFixture(t, false, false)
+	s := f.s
+	s.State, s.Latch = StateBattle, NewEndLatch()
+	if local, _ := s.triggerLocalPlayer(); local == 0 {
+		t.Fatal("fixture does not exercise a later human row")
+	}
+	for _, owner := range []uint8{3, 4, 255} {
+		if _, err := s.TakeOverReplay(owner); err == nil {
+			t.Fatalf("unplayable seat %d accepted", owner)
+		}
+	}
+	s.seatCommands.removed[1] = true
+	if _, err := s.TakeOverReplay(1); err == nil {
+		t.Fatal("removed seat accepted")
+	}
+	s.Survival = &survivalState{attacker: 2}
+	if _, err := s.TakeOverReplay(2); err == nil {
+		t.Fatal("scenario attacker accepted")
+	}
+	s.Survival = nil
+	s.Econ.Players[2].GameEnded = true
+	if _, err := s.TakeOverReplay(2); err == nil {
+		t.Fatal("ended computer accepted")
+	}
+	if _, err := s.TakeOverReplay(0); err != nil {
+		t.Fatal(err)
+	}
+	if local, ok := s.triggerLocalPlayer(); !ok || local != 0 || s.Econ.Players[1].ControllerState != 1 {
+		t.Fatal("old human rows overrode the selected local owner or were deactivated")
+	}
+}
+
+func TestOnlineReplayTakeoverPromotesComputerAndAcceptsLocalCommands(t *testing.T) {
+	inputs, config := onlineComputerFixtureMatch(t, onlineComputerTestSetup(false))
+	s, err := NewPlaytestSkirmish(inputs, config, 0, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(s.closeAIControllers)
+	if err := s.PrepareGrantedBattle(); err != nil {
+		t.Fatal(err)
+	}
+	for tick := uint32(1); tick <= 30; tick++ {
+		if err := s.StepGranted(tick); err != nil {
+			t.Fatal(err)
+		}
+	}
+	chosen, other := s.AI[3], s.AI[2]
+	closed, retained := &closeCountingExt{}, &closeCountingExt{}
+	chosen.Ext, other.Ext = closed, retained
+	sum, sim, crt := s.UnitStateChecksum(), *s.SimRNG(), *s.CrtRNG()
+	floor, err := s.TakeOverReplay(3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.UnitStateChecksum() != sum || *s.SimRNG() != sim || *s.CrtRNG() != crt {
+		t.Fatal("online handoff changed the world or a random stream")
+	}
+	if !s.OnlineCommandContext() || !s.onlineResults.seats[3].present || s.onlineResults.hosted[3] != -1 || s.Vis.PerspectiveOf(3) != 3 || s.Vis.PerspectiveOf(2) != 0 {
+		t.Fatal("online handoff lost the online kernel or failed to detach the chosen seat's perspective")
+	}
+	if closed.closed != 1 || retained.closed != 0 || s.AI[3] != chosen || s.AI[2] != other {
+		t.Fatal("the wrong controller was retired")
+	}
+	// Both recorded humans keep their seat rows, so their machines' sensor
+	// passes and hosted computers carry on, but the Modern AI plays them.
+	for _, human := range []uint8{0, 1} {
+		if !s.ModernAIPlayer(human) || s.Econ.Players[human].ControllerState != 2 || s.seatCommands.online.roles[human] != MatchRoleComputer ||
+			!s.onlineResults.seats[human].present || !s.Econ.Players[human].FullIncome {
+			t.Fatalf("recorded human %d was not handed to the Modern AI", human+1)
+		}
+	}
+	actor := replayUnits(s, 3)[0]
+	c, err := s.CaptureOnlineCommand(HumanCommand{Kind: HumanStop, Stop: HumanStopCommand{Handles: []pool.Handle{actor}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.EnqueueSeatCommand(CommandStamp{Seat: 3, Tick: 31, Position: floor + 1}, c); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.StepGranted(31); err != nil {
+		t.Fatal(err)
+	}
+	rs := s.DrainCommandReceipts()
+	if len(rs) != 1 || rs[0].Outcome != CommandApplied || s.LocalOwner != 3 {
+		t.Fatalf("promoted computer's live command: %+v; local %d", rs, s.LocalOwner)
+	}
+	s.Units.Destroy(actor, 1)
+	for i := 0; i < 300 && !s.GetResult().Ended; i++ {
+		if err := s.StepGranted(s.Clock.GlobalTick + 1); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// No human plays on, so the local defeat ends the continuation.
+	if result := s.GetResult(); !result.Ended || result.Kind != "defeat" || !s.OnlineBattleEnded() {
+		t.Fatalf("the promoted player's defeat did not end the continuation: %+v", result)
+	}
+}
+
+// A continued online replay saves and loads as an offline skirmish of the
+// chosen seat (DESIGN_MULTIPLAYER §10.1). Under Strict 3.1, whose fresh
+// offline skirmishes keep sight separate and whose rooms host one computer
+// per human, the room's team sight survives the load; under Modern a room's
+// mixed computer difficulties do.
+func TestOnlineContinuationLoadsAsOfflineSkirmish(t *testing.T) {
+	for _, tc := range []struct {
+		mode      gameplay.Mode
+		computers int
+		chosen    uint8
+		seats     []SeatDifficulty
+	}{
+		{gameplay.Strict31, 1, 2, nil},
+		// Seat 2 is the room's hard Classic computer; seat 3, taken over, is
+		// no computer any more, and the recorded humans never had a word.
+		{gameplay.Modern, 2, 3, []SeatDifficulty{{Player: 2, Difficulty: 2}}},
+	} {
+		t.Run(string(tc.mode), func(t *testing.T) {
+			setup := onlineComputerTestSetup(false)
+			setup.Rules, setup.Computers = string(tc.mode), setup.Computers[:tc.computers]
+			inputs, config := onlineComputerFixtureMatch(t, setup)
+			s, err := NewPlaytestSkirmish(inputs, config, 0, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(s.closeAIControllers)
+			if err := s.PrepareGrantedBattle(); err != nil {
+				t.Fatal(err)
+			}
+			for tick := uint32(1); tick <= 30; tick++ {
+				if err := s.StepGranted(tick); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, err := s.TakeOverReplay(tc.chosen); err != nil {
+				t.Fatal(err)
+			}
+			seats := s.SeatDifficulties()
+			if !reflect.DeepEqual(seats, tc.seats) {
+				t.Fatalf("seat difficulties %+v, want %+v", seats, tc.seats)
+			}
+			summary := RetailBattleSummary(s, "continued", "0", s.Skirmish.UnitLimit)
+			in, err := s.RetailBattleSaveInputs(summary, save.Camera{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(t.TempDir(), "CONTINUED.SAV")
+			if err := s.WriteRetailSave(path, in); err != nil {
+				t.Fatal(err)
+			}
+			fs, cat := onlineComputerInstall(t)
+			for _, continued := range []bool{true, false} {
+				deps := RetailLoadDeps{FS: fs, Catalog: cat, SimSeed: 7, CRTSeed: 11, UnitLimit: s.Skirmish.UnitLimit, Gameplay: tc.mode,
+					AlliedSight: true, AIControllers: RecordAIControllers(s)}
+				if continued {
+					deps.ContinuedOnline, deps.SeatDifficulties = true, seats
+				}
+				loaded, err := LoadRetailSavePath(path, deps)
+				if err != nil {
+					t.Fatal(err)
+				}
+				dst := loaded.Battle.Session
+				t.Cleanup(dst.closeAIControllers)
+				if dst.onlineResults != nil || dst.OnlineCommandContext() || dst.LocalOwner != tc.chosen || !dst.ModernAIPlayer(0) || !dst.ModernAIPlayer(1) {
+					t.Fatal("the save did not load as an offline skirmish of the chosen seat")
+				}
+				if want := continued || tc.mode != gameplay.Strict31; dst.Skirmish.AlliedSight != want {
+					t.Fatalf("continued %v: allied sight %v, want %v", continued, dst.Skirmish.AlliedSight, want)
+				}
+				for _, seat := range tc.seats {
+					want, _ := sessionSeatDifficultyWord(s, seat.Player)
+					got, ok := sessionSeatDifficultyWord(dst, seat.Player)
+					if continued != (ok && got == want && dst.AI[seat.Player].Profile.Plan == s.AI[seat.Player].Profile.Plan) {
+						t.Fatalf("continued %v: seat %d difficulty %d (%v), plan %q, want %d, plan %q", continued, seat.Player, got, ok,
+							dst.AI[seat.Player].Profile.Plan, want, s.AI[seat.Player].Profile.Plan)
+					}
+				}
+			}
+		})
+	}
+}

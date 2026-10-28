@@ -46,6 +46,49 @@ func TestSpotTerrIsSpotTerritory(t *testing.T) {
 	}
 }
 
+// Under playFramePower an energy frame's pending output is its full output
+// times its build progress, and a builder still walking to a planned site
+// counts the full output; without the part every frame counts in full.
+func TestEnergyFramePendsByProgress(t *testing.T) {
+	for _, c := range []struct {
+		play               int32
+		frame, withWalking int64
+	}{
+		{play: 23, frame: 5000, withWalking: 25000},
+		{play: 7, frame: 20000, withWalking: 40000},
+	} {
+		p := DefaultParams()
+		p.Play = c.play
+		w := newDefWorld(p)
+		s := w.e.s
+		d := w.d
+		const tick = 3 * 1800
+		frame := aikit.OwnUnit{H: 40, Gen: 1, Info: d.sol, X: 380, Z: 600, HP: 75, MaxHP: d.sol.HP, Progress: 25}
+		// base()[1] builds the frame; with walking, a second constructor
+		// is on its way to another solar site.
+		units := func(walking bool) []aikit.OwnUnit {
+			all := append(w.base(), frame, own(9, d.con, 720, 700))
+			builders := []*aikit.OwnUnit{&all[1]}
+			if walking {
+				builders = append(builders, &all[len(all)-1])
+			}
+			for _, u := range builders {
+				u.Order = aikit.OrderOther
+				*s.commitOf(u) = commitment{def: u.Info, gen: u.Gen, kind: cEnergy, prod: d.sol, tick: tick}
+			}
+			return all
+		}
+		w.think(tick, units(false))
+		if s.pendE != c.frame {
+			t.Errorf("play=%d: a quarter-built solar with its builder pends %d, want %d", c.play, s.pendE, c.frame)
+		}
+		w.think(tick+15, units(true))
+		if s.pendE != c.withWalking {
+			t.Errorf("play=%d: the frame and a second builder walking to a solar pend %d, want %d", c.play, s.pendE, c.withWalking)
+		}
+	}
+}
+
 // The per-handle tables grow once, on the first handle they are asked
 // for, to cover every handle of the owner's pool slice: a later handle in
 // the slice finds the table already long enough.

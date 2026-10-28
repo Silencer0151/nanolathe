@@ -184,7 +184,7 @@ func (b *battleSession) activateBattleRestartGadget(index int, cl *client.Client
 // consumer tears it down. It deliberately does not call Session.Retry: retail
 // enters a fresh normal load with fresh entry RNG state [08 R-CAMP-01 §8].
 func (b *battleSession) battleRestartRequest() (battleRestartRequest, bool) {
-	if b == nil || b.sess == nil || b.sess.Mission == nil {
+	if b == nil || b.sess == nil || b.sess.Mission == nil || b.takeoverRefusal("RESTART") != "" {
 		return battleRestartRequest{}, false
 	}
 	request := battleRestartRequest{Difficulty: restartDifficulty(b.restart.difficulty)}

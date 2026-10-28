@@ -1450,6 +1450,79 @@ ARMCK patrolling past the fixture map's rocks pays four rock reclaims, never
 borrows an animating rock and starts each next job within one cadence; on the
 previous implementation it re-picked a rock still playing its sequence.
 
+### Modern build-stance retry
+
+**Nanolathe Modern policy — user-authorized 2026-10-26, issue #171.** A ground
+work record that has waited 450 ticks for its builder's stance arranges
+`StartBuilding` again, and does so every 450 ticks until the stance rises. It
+is not retail behavior.
+
+**Strict baseline.** The ground work rows `HelpBuild`, `RepairUnit`, `Capture`,
+`Reclaim`, `Resurrect` and `ReclaimUnit` arrange `StartBuilding` once and then
+park on the shared `INBUILDSTANCE` wait. That wait writes gate `0x4` and no
+deadline, so only the unit's script writing an engine port wakes it
+[04 R-ORD-01 §1][04 R-COB-06]. Stock builder scripts make the readiness a
+state machine: `StartBuilding` stores its heading and runs
+`start-script RequestState(0)`, and the opening body behind that request
+writes the stance. A unit's script has eight thread slots, and a start-script
+that finds none free is skipped without a trace [04 §4.2][04 §4.3]. Between two
+jobs the previous `StopBuilding` is often still closing the nanolathe, which
+holds `RequestState`, `Stop` and `close` beside the three permanent walk and
+smoke threads. The new `StartBuilding` takes the seventh slot. If a movement
+tier change in the same unit visit starts `StartMoving` or `StopMoving`
+[04 §5.2], that callback takes the eighth slot and its wake drain runs
+`StartBuilding` first. The script then stays closed, nothing writes a port, and
+the record keeps the builder for the rest of the game; only a new order frees
+it. Strict 3.1 and Community 3.9 keep that answer.
+
+Modern patrol chains reclaims far faster than a player issues them, so it
+reaches this state routinely. Issue #171's ARMCK stopped this way on Great
+Divide; six CORACKs patrolling the same forest all stopped within about two
+thousand ticks.
+
+**Modern behavior.** `orders.Rules.BuildStanceWait` sees every visit of the
+shared wait together with its satisfied set and the work position the row's
+own emission aimed at. Modern answers by keeping a 450-tick deadline beside the
+gate. On a deadline wake it arranges `StartBuilding` toward the same work
+position, with the bearing taken against the builder's current heading as
+every emission is [04 R-CB-01 §3], and arms the next deadline. For a stock
+`RequestState` script a repeated request for the opening state is idempotent.
+A wake by the script-touched marker alone keeps the pending deadline, so
+unrelated port writes cannot postpone the retry. A ready stance releases the
+deadline, and the row's next phase arms its own.
+
+The interval is above every stock ground builder's ordinary close-then-open
+handshake measured on Great Divide patrols: ARMCK 275 ticks, CORCK 162, the
+construction vehicles 82–127, the advanced kbots 139 and CORACK 124, and the
+commanders, CORNECRO and ARMFARK under 100. Those measurements cover stock
+content only. A mod or add-on script whose opening takes longer than 450 ticks,
+or whose `StartBuilding` is not idempotent, receives a redundant
+`StartBuilding` each interval until its stance rises; the policy accepts that.
+
+**Boundaries.** The policy adds no node field, checkpoint or save bytes; the
+deadline is the record's ordinary deadline word. It draws no randomness and
+debits no resource. The retried callback carries the record's existing
+StopBuilding-pending flag, so cleanup still emits one counterpart. A switch of
+rule set takes effect at the record's next visit and unwinds nothing: a retry
+deadline armed under Modern still wakes the record once under Strict 3.1, which
+re-parks it on the gate alone, and a record already parked under Strict gains
+the retry only at its next script-touched wake. Aircraft keep their own
+stance exception [04 R-ORD-02 §2]. Construction's ground `MobileBuild`
+readiness wait in `internal/construction` is outside this policy: its wake path
+carries construction's own interrupt bits, and no report or trace has shown a
+mobile build losing its request yet.
+
+**Verification.** `internal/orders/build_stance_modern_test.go` locks the retry
+deadline, the re-arranged callback and the absence of draws under Modern, the
+deadline-free park under Strict and Community, the marker keeping the deadline,
+a ready stance releasing it, and a rule-set switch in each direction
+(`TestBuildStanceRetryFollowsARuleSwitch`). `inbuildstance_deadline_test.go` and
+`inbuildstance_wake_test.go` keep the Strict wait. In `internal/session`,
+`TestModernPatrolBuildStanceRetryUnparksReclaimRetail` drives six CORACKs on
+Great Divide's forest patrols. Every stance wait ends within the bound and
+every builder keeps working; without the retry the first builder parks at tick
+141.
+
 ### Constructor patrol audit — 2026-10-09
 
 This audit covers acquisition, approach, paid work and return, prompted by the
@@ -1671,7 +1744,8 @@ still sets the script-touched marker, as does every arm `[04 §4.7]`
 `[04 R-P0-10]` `[04 R-COB-03 §4]`. That marker is not opaque: it is the unit's
 pending bit `0x4`, and the order pump's satisfied merge is its only consumer, so
 a script's engine write is the only thing that re-polls the in-build-stance and
-transport-busy waits `[04 R-COB-06]`.
+transport-busy waits `[04 R-COB-06]`. Modern adds a retry deadline to the
+ground work rows' in-build-stance wait ("Modern build-stance retry").
 
 **Callbacks** (`ports.go`, `bridge.go`). `CallbackBridge` is the one bridge per
 unit, retained for its life so that sinks a caller installed survive a callback

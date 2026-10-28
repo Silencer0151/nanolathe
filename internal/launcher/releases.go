@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -35,8 +36,8 @@ func PackageAsset(goos, goarch string) string {
 }
 
 // ErrNoRelease reports that a channel has no complete release for this
-// platform yet, which is the Stable channel's state until the first signed
-// release.
+// platform yet, which is the Stable channel's state until a vX.Y.Z release
+// carries native builds.
 var ErrNoRelease = errors.New("nanolathe: the channel has no release for this platform yet")
 
 // Release is one published build a channel offers.
@@ -232,6 +233,34 @@ type BuildInfo struct {
 }
 
 var revisionPattern = regexp.MustCompile(`^[0-9a-f]{40}$`)
+
+// buildRecord is a release's build.json, checked against its SHA256SUMS.
+type buildRecord struct {
+	sums map[string][32]byte
+	data []byte
+	info BuildInfo
+}
+
+// buildRecord downloads a release's SHA256SUMS and build.json and verifies
+// the record before it is read.
+func (s Source) buildRecord(ctx context.Context, rel Release) (buildRecord, error) {
+	var rec buildRecord
+	sumData, err := s.small(ctx, rel, checksumsAsset)
+	if err != nil {
+		return rec, err
+	}
+	if rec.sums, err = parseChecksums(sumData); err != nil {
+		return rec, err
+	}
+	if rec.data, err = s.small(ctx, rel, buildInfoAsset); err != nil {
+		return rec, err
+	}
+	if err := checkSum(rec.sums, buildInfoAsset, sha256.Sum256(rec.data)); err != nil {
+		return rec, err
+	}
+	rec.info, err = parseBuildInfo(rec.data)
+	return rec, err
+}
 
 func parseBuildInfo(data []byte) (BuildInfo, error) {
 	var info BuildInfo

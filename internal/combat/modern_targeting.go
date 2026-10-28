@@ -5,6 +5,7 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/content"
 	"github.com/nanolathe-gg/nanolathe/internal/economy"
 	"github.com/nanolathe-gg/nanolathe/internal/pool"
+	"github.com/nanolathe-gg/nanolathe/internal/sim/numeric"
 	"github.com/nanolathe-gg/nanolathe/internal/units"
 	"github.com/nanolathe-gg/nanolathe/internal/visibility"
 	"github.com/nanolathe-gg/nanolathe/internal/world"
@@ -310,8 +311,10 @@ func (s *Service) allied(a, b uint8, econ *economy.Service) bool {
 }
 
 // threatScore examines at most three enemy slots. A weapon must actually be
-// capable of damaging this unit or its currently targeted nearby ally. There
-// is no building-name table, or whole-world scan inside the candidate loop.
+// capable of damaging this unit or its currently targeted nearby ally. A
+// shooter that cannot move defends what lies beyond it, so for it a weapon that
+// could engage it from somewhere also counts while out of range. There is no
+// building-name table, or whole-world scan inside the candidate loop.
 func (s *Service) threatScore(q *TargetQuery, target *units.Unit) int64 {
 	score := int64(1)
 	if target.Stunned || target.Remaining != 0 {
@@ -335,7 +338,7 @@ func (s *Service) threatScore(q *TargetQuery, target *units.Unit) int64 {
 				active = true
 			}
 		}
-		if !s.CanEngageSlotTarget(target, victim, idx, q.Terrain) {
+		if !s.CanEngageSlotTarget(target, victim, idx, q.Terrain) && (q.Shooter.Def == nil || q.Shooter.Def.CanMove || !s.modernWeaponCouldEngage(target, victim, weapon, q.Terrain)) {
 			continue
 		}
 		damage := s.effectiveDamage(weapon, victim, target)
@@ -359,6 +362,63 @@ func (s *Service) threatScore(q *TargetQuery, target *units.Unit) int64 {
 		}
 	}
 	return score
+}
+
+// modernWeaponCouldEngage is the unit-to-unit acquisition gate without its
+// range clause: the weapon's medium and height admit this victim, wherever
+// the two units now stand.
+func (s *Service) modernWeaponCouldEngage(u, victim *units.Unit, weapon *content.WeaponDef, terrain *world.Terrain) bool {
+	if u == nil || u.Def == nil || victim == nil || !victim.Alive || victim.Def == nil {
+		return false
+	}
+	sea := int32(0)
+	if terrain != nil {
+		sea = int32(terrain.SeaLevel)
+	}
+	return s.rules().AdmitTarget(TargetAdmission{Service: s, Weapon: weapon, Shooter: gateEndForUnit(u), Target: gateEndForUnit(victim),
+		Sea: sea, WaterWeapon: weapon.WaterWeapon, ToAir: weapon.ToAirWeapon})
+}
+
+// modernKillScale weights a target's threat by how soon this slot removes it:
+// the whole shots its health needs, after the reliable incoming fire already
+// promised, times the slot's reload. A threat that dies sooner stops firing
+// sooner, and the shots this slot has landed bring its own target closer.
+// Counting whole shots leaves targets one shot apart to the overage
+// preference.
+func modernKillScale(score, damage int64, weapon *content.WeaponDef, target *units.Unit, incoming int64) int64 {
+	remaining := int64(target.Health) - incoming
+	if remaining < 1 {
+		remaining = 1
+	}
+	if damage < 1 {
+		damage = 1
+	}
+	reload := int64(weapon.ReloadTime)
+	if reload < 1 {
+		reload = 1
+	}
+	shots := (remaining + damage - 1) / damage
+	return score * 64 * 300 / (shots * reload)
+}
+
+// modernHitFactor is the share, out of 1024, of an unguided projectile's hits
+// that a moving target leaves it: 32 / (32 + the distance the target travels
+// during the shot's flight at its current speed). Beam and tracking weapons
+// keep every hit. The shape follows hit rates measured over Modern arena
+// games (DESIGN_WEAPONS_PROJECTILES "Modern threat targeting").
+func modernHitFactor(weapon *content.WeaponDef, shooter, target *units.Unit) int64 {
+	if weapon.BeamWeapon || weapon.Tracks || weapon.WeaponVelocity <= 0 {
+		return 1024
+	}
+	dx, dz := int64(shooter.X.Int()-target.X.Int()), int64(shooter.Z.Int()-target.Z.Int())
+	speed := int64(target.Move.Speed.Raw())
+	if speed < 0 {
+		speed = -speed
+	}
+	// Both speeds are 16.16 per tick, so their ratio times the distance is
+	// the target's travel in world units.
+	travel := speed * numeric.ISqrt64(dx*dx+dz*dz) / int64(weapon.WeaponVelocity)
+	return 1024 * 32 / (32 + travel)
 }
 
 // modernTargetObstructed applies the existing Modern physical previews to an
@@ -540,6 +600,8 @@ func (*ModernRules) SelectTarget(s *Service, q *TargetQuery) (pool.Handle, bool)
 		if overage {
 			score = score * 4 / 5
 		}
+		score = modernKillScale(score, s.effectiveDamage(q.Slot.Weapon, target, q.Shooter), q.Slot.Weapon, target, incoming)
+		score = score * modernHitFactor(q.Slot.Weapon, q.Shooter, target) / 1024
 		// An aircraft looking for work ranks a target other aircraft of its
 		// side are already expected to destroy below every other candidate.
 		covered := air.sight && airCovered(air.claims, target)

@@ -49,7 +49,7 @@ type app struct {
 	hasGame    bool
 	checking   bool
 	checkGen   int
-	offered    *launcher.Release
+	offer      *launcher.Offer // replaced, never changed in place, so a frame may keep it
 	offerErr   error
 	busy       string  // what a running task is doing, "" when idle
 	progress   float64 // 0..1, or <0 when no bar shows
@@ -104,34 +104,34 @@ func (a *app) refreshInstalled() {
 	}
 }
 
-// check asks the channel for its release. Stable has none until the first
-// signed release; a player who has not chosen a channel then follows Latest
-// for now, so a first install can play, and Stable once it has a release.
-// A check the player overtook by switching channels is dropped.
+// check asks the player's channel for its release and where it stands
+// against the installed build, which only ever moves forward
+// (launcher.Install.Offer); a player who has not chosen a channel follows
+// Latest (launcher.LoadSettings). A check the player overtook by switching
+// channels is dropped.
 func (a *app) check() {
 	a.mu.Lock()
 	a.checkGen++
-	gen, settings, chosen := a.checkGen, a.settings, a.chosen
-	a.checking, a.offered, a.offerErr = true, nil, nil
+	gen, ch := a.checkGen, a.settings.Channel
+	a.checking, a.offer, a.offerErr = true, nil, nil
 	a.mu.Unlock()
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		// Up to four requests: the listing, the release's checksums and
+		// build record, and the comparison.
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		rel, ch, err := launcher.Offer(ctx, a.src, settings, chosen, a.goos, a.goarch)
+		offer, err := a.in.Offer(ctx, a.src, ch, a.goos, a.goarch)
 		a.mu.Lock()
 		defer a.mu.Unlock()
 		if gen != a.checkGen {
 			return
 		}
 		a.checking = false
-		if !chosen {
-			a.settings.Channel = ch
-		}
 		if err != nil {
 			a.offerErr = err
 			return
 		}
-		a.offered = &rel
+		a.offer = &offer
 	}()
 }
 
@@ -193,6 +193,7 @@ func (a *app) install() {
 	a.mu.Unlock()
 	a.task("Installing", "", func() error {
 		if err := a.in.InstallLauncher(a.running); err != nil {
+			//lint:ignore ST1005 status text, shown to the player as written
 			return fmt.Errorf("Could not install the launcher: %w", err)
 		}
 		version := ""
@@ -200,6 +201,7 @@ func (a *app) install() {
 			version = game.Version
 		}
 		if err := shell.Register(shell.Entries{Base: a.in.Base, Launcher: a.in.InstalledLauncher(), Version: version, Desktop: desktop}); err != nil {
+			//lint:ignore ST1005 status text, shown to the player as written
 			return fmt.Errorf("Could not add the Start Menu shortcut: %w", err)
 		}
 		if err := startInstalled(a.in.InstalledLauncher(), a.in.Base); err != nil {
@@ -215,13 +217,14 @@ func (a *app) install() {
 // update installs the offered release.
 func (a *app) update() {
 	a.mu.Lock()
-	rel := a.offered
+	offer := a.offer
 	a.mu.Unlock()
-	if rel == nil {
+	if offer == nil {
 		return
 	}
+	rel := offer.Release
 	a.task("Downloading", "", func() error {
-		err := a.in.Update(context.Background(), a.src, *rel, a.goos, a.goarch, func(done, total int64) {
+		err := a.in.Update(context.Background(), a.src, rel, a.goos, a.goarch, func(done, total int64) {
 			a.mu.Lock()
 			if total > 0 {
 				a.progress = float64(done) / float64(total)
@@ -235,8 +238,12 @@ func (a *app) update() {
 		a.refreshInstalled()
 		a.mu.Lock()
 		version := a.game.Version
+		if a.offer == offer {
+			a.offer = &launcher.Offer{Release: rel, Standing: launcher.Current}
+		}
 		a.mu.Unlock()
 		if launcherErr != nil {
+			//lint:ignore ST1005 status text, shown to the player as written
 			return fmt.Errorf("Updated to %s, but the launcher could not update itself: %w", version, launcherErr)
 		}
 		a.setStatus("Updated to " + version + ".")
@@ -260,6 +267,7 @@ func (a *app) play() {
 			a.root = ""
 			a.mu.Unlock()
 			a.chooseFolder(true)
+			//lint:ignore ST1005 status text, shown to the player as written
 			return errors.New("The remembered game folder is no longer usable. Choose it again.")
 		}
 		return a.start(root)
@@ -268,6 +276,7 @@ func (a *app) play() {
 
 func (a *app) start(root string) error {
 	if _, logName, err := a.in.Start(root); err != nil {
+		//lint:ignore ST1005 status text, shown to the player as written
 		return fmt.Errorf("Could not start the game: %w (log %s)", err, logName)
 	}
 	a.mu.Lock()
@@ -306,6 +315,7 @@ func (a *app) chooseFolder(launchNext bool) {
 func (a *app) useFolder(root string) {
 	a.task("Checking", "Checking "+root, func() error {
 		if !a.checkRoot(root) {
+			//lint:ignore ST1005 status text, shown to the player as written
 			return errors.New("That folder is not a usable Total Annihilation installation. Its log is in the logs folder.")
 		}
 		if err := a.in.Remember(root); err != nil {

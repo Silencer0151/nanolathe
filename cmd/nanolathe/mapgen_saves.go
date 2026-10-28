@@ -14,10 +14,19 @@ import (
 // the recipe, and loading either makes the map again when it is not mounted.
 
 // battleRecipe is the recipe of the generated map the running battle was
-// entered on, as a save records it; nil for any other map.
+// entered on, as a save records it; nil for any other map. A battle
+// continued from a replay plays the recorded map, whose recipe the replay
+// carries even when this content does not hold the map: a recorded online
+// room's playback makes it on the room's content alone
+// (DESIGN_MULTIPLAYER §10.1).
 func (g *gameShell) battleRecipe() json.RawMessage {
 	if g == nil || g.battle == nil || g.battle.sess == nil {
 		return nil
+	}
+	if t := g.battle.takeover; t != nil && t.source != nil {
+		if config, err := t.source.header.Configuration(); err == nil && len(config.Request().GeneratedMap) != 0 {
+			return json.RawMessage(config.Request().GeneratedMap)
+		}
 	}
 	return g.cs.generatedRecipeRecord(g.battle.sess.Skirmish.MapName)
 }

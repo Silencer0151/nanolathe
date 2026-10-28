@@ -47,14 +47,10 @@ function Test-NanolatheReleaseAssets($Release) {
 }
 
 # Select-NanolatheRelease picks the release whose launcher to install: the
-# newest published vX.Y.Z release carrying the setup download (Stable), or
-# else the highest-numbered native-<run> prerelease (Latest), as the
-# launcher itself chooses for a player who has not picked a channel. The
-# launcher then installs the game from its own channel.
-function Select-NanolatheRelease($Latest, $Releases) {
-    if ($null -ne $Latest -and !$Latest.prerelease -and $Latest.tag_name -cmatch '^v[0-9]+\.[0-9]+\.[0-9]+$' -and (Test-NanolatheReleaseAssets $Latest)) {
-        return $Latest
-    }
+# highest-numbered complete native-<run> prerelease, Latest, which a player
+# who has not chosen a channel follows. The launcher then installs the game
+# from the player's channel and takes the launcher that build ships.
+function Select-NanolatheRelease($Releases) {
     $best = $null
     $bestRun = -1
     foreach ($release in $Releases) {
@@ -188,9 +184,7 @@ Original game assets are required to play.
         Write-Host "Installing Nanolathe into $base"
         [Net.ServicePointManager]::SecurityProtocol = $tlsBefore -bor [Net.SecurityProtocolType]::Tls12
         Write-Host 'Finding the newest Nanolathe release...'
-        $latest = $null
-        try { $latest = Get-NanolatheJson "$api/releases/latest" } catch { $latest = $null }
-        $release = Select-NanolatheRelease $latest (Get-NanolatheJson "$api/releases?per_page=50")
+        $release = Select-NanolatheRelease (Get-NanolatheJson "$api/releases?per_page=50")
         Write-Host "Using the launcher from release $($release.tag_name)"
         $work = Join-Path $base ('work-' + [guid]::NewGuid().ToString('N'))
         [void][IO.Directory]::CreateDirectory($work)
