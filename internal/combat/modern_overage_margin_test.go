@@ -20,6 +20,8 @@ func TestModernOveragePreferenceSurvivesRetentionMargin(t *testing.T) {
 	b.InstallWeapon(0, weapon)
 	shooter.SlotAt(0).Target = units.Target{Kind: units.TargetUnit, Unit: a.Handle}
 	q := modernTargetQuery(s, w, terrain, shooter, a, b)
+	// Both die to one shot, so kill speed is equal and overage decides.
+	b.Health = 60
 	a.Health = 50 // a 60-damage shot is exactly 120 percent
 	if got, _ := s.rules().SelectTarget(s, &q); got != a.Handle {
 		t.Fatal("allowed overage needlessly changed target")
