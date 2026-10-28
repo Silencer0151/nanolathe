@@ -1836,8 +1836,9 @@ each with its content digest (§5.7), and is written as schema 3 when it has
 no Survival director, with or without restrictions, so that a build that
 cannot restore them refuses the load. A Survival director selects schema 4,
 with or without restrictions and add-ons. A generated map's recipe selects
-schema 5, with or without any of those. A sidecar with none of these
-four records stays schema 1. `contentProfile`
+schema 5, with or without any of those. A continued online replay's
+`onlineReplay` record selects schema 6, with or without any of those. A
+sidecar with none of these five records stays schema 1. `contentProfile`
 is the mounted content's report name: the running config's id, or `retail`
 for content without one. `community` records the session's Community sources and its
 battle-entry table (`Session.CommunitySources`, `Session.EntryCommunity`), so
@@ -1875,12 +1876,21 @@ make the map again refuses the load rather than loading the bank on whatever
 map has that name; schema 5 also carries a non-null `survival` director and
 its `survivalBest` record when the battle had them, and `addons` when it had
 any. The load mounts the map before the bank is read, made again from the
-recipe when it is not mounted (§7.3). The save package checks these
+recipe when it is not mounted (§7.3). `onlineReplay` marks the offline save of
+a continued online replay (DESIGN_MULTIPLAYER §10.1): `content`, the room
+content it ran on (`kind` 1 a base archive, 2 an official add-on, 3 a map
+package, with `name`, `version`, `size` and `sha256`); `difficulty`, each
+computer seat's own word when the room's computers differed (`player`,
+`difficulty` 0–2); and `sharedSight`, the room's team sight. It requires
+schema 6 and schema 6 requires it, so a build that cannot mount the room's
+content refuses the load; schema 6 may also carry restrictions, a Survival
+director and a generated map's recipe. Its add-ons are named in `content`,
+so it records no `addons`. The save package checks these
 structural combinations on both write and read. The record owners validate
 their versions and contents; an unsupported director, eligibility record or
 recipe refuses the load.
 
-Ordinary sidecars are limited to 1 MiB. Schemas 4 and 5 permit up to 16 MiB
+Ordinary sidecars are limited to 1 MiB. Schemas 4 to 6 permit up to 16 MiB
 because a Survival battle's planned wave and history grow during it. The writer and
 reader enforce the same byte limit; an oversized record is a reported save
 failure. Automatic slots validate the staged bank and sidecar before replacing
@@ -1912,6 +1922,14 @@ the previous checkpoint (DESIGN_SESSIONS_AI_SAVE §5).
    of that name with other files, or a recipe this build cannot make again,
    refuses the load with the reason; the direct battle view (`--map`) refuses
    and says to start without it (DESIGN_MAP_GENERATOR §10).
+   **Continued online replay.** An `onlineReplay` record replaces the add-on
+   step: on the recorded mod, the load mounts the recorded room content as a
+   replay of that room does (DESIGN_MULTIPLAYER §16.8), with the generated
+   map `generatedMap` names mounted from memory in it, and restores onto it,
+   holding the mount for the battle's life; content this install lacks
+   refuses the load, naming it. The restored skirmish takes the recorded seat
+   difficulties and, in every mode, the room's team sight
+   (DESIGN_MULTIPLAYER §10.1).
 3. **Rule set.** Bind the recorded name. If this build cannot select it (a
    registered set that is not linked), load under the recorded base and show a
    warning on the battle message line. The load also makes the bound set the
@@ -2129,7 +2147,10 @@ leaves the line empty (DESIGN_INTERFACE_HUD_INPUT §2.6).
 
 **Guards.** Architecture tests: only `internal/modfetch` and the multiplayer
 WebSocket transport in `internal/relay` import `net/http`; only `cmd/nanolathe`
-imports `internal/modfetch`; no simulation
+imports `internal/modfetch`. The game itself has no other network access
+(D5). Outside it, the separate launcher program's release download,
+`internal/launcher` (tools/installer/README.md "Windows launcher"), also
+imports `net/http`, and only `cmd/nanolathe-launcher` imports it. No simulation
 package imports either new package. `ApplyMutators` walks weapon damage
 through `DamageKeysSorted`, never by ranging a map ([INVARIANTS](INVARIANTS.md)
 I1). Everything used — `archive/zip`, `net/http`, `crypto/sha256` and, later,

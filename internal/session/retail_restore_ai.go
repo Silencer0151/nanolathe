@@ -3,6 +3,7 @@ package session
 import (
 	"fmt"
 
+	"github.com/nanolathe-gg/nanolathe/internal/ai"
 	"github.com/nanolathe-gg/nanolathe/internal/mission"
 	"github.com/nanolathe-gg/nanolathe/vfs"
 )
@@ -72,10 +73,32 @@ func initializeRestoredBattleAI(s *Session, fs vfs.FSOps, m *mission.Mission, se
 	if err != nil {
 		return err
 	}
+	// A continued online replay's computers that carried their own difficulty
+	// take a profile of their own per word, as the room's battle entry gave
+	// them (docs/DESIGN_MULTIPLAYER.md §6.6, §10.1); every other slot shares
+	// the one profile.
+	var seatProfiles [3]*ai.Profile
 	// Ascending slot order: each constructor consumes its exact eight strategic
 	// draws from the shared stream in that order [08 R-ENTRY-01 §3 step 24].
 	for _, slot := range slots {
-		if err := initializeBattleAI(s, slot, prof, sessionKind); err != nil {
+		own := prof
+		if word, ok := sessionSeatDifficultyWord(s, slot); ok {
+			if seatProfiles[word] == nil {
+				if seatProfiles[word], err = loadSkirmishAIProfile(fs, battleAIProfileName(m)); err != nil {
+					return err
+				}
+			}
+			own = seatProfiles[word]
+		}
+		// As battle entry does: with seat words the battle-wide setter
+		// stands aside (sessionAIDifficulty), so each slot's profile takes
+		// its own seat's word or the battle's.
+		if sessionHasSeatDifficulty(s) {
+			if difficulty, ok := sessionAIDifficultyFor(s, slot); ok {
+				own.SetDifficulty(difficulty)
+			}
+		}
+		if err := initializeBattleAI(s, slot, own, sessionKind); err != nil {
 			return err
 		}
 	}

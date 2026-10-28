@@ -359,9 +359,15 @@ func TestOnlineRecordingPlaysBack(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p, _, _, err := play(t, fs, cut, 30)
+	p, continued, _, err := play(t, fs, cut, 30)
 	if err != nil || !p.Truncated() || p.Tick() != cutSummary.FinalTick || p.Tick() == 0 || p.Tick() >= rec.ticks || p.Mismatch() != nil {
 		t.Fatalf("cut recording played to %d (summary %d), truncated %v: %v", p.Tick(), cutSummary.FinalTick, p.Truncated(), err)
+	}
+	if _, err := p.TakeOver(1); err != nil {
+		t.Fatalf("last complete pump of an incomplete recording cannot continue: %v", err)
+	}
+	if err := continued.StepGranted(continued.Clock.GlobalTick + 1); err != nil {
+		t.Fatal(err)
 	}
 
 	// A checksum the playback cannot reproduce stops it at that tick.

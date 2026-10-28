@@ -436,18 +436,30 @@ func deadlineRestart(n *Node, tick uint32, ticks int32) Code {
 // units.Unit.raiseScriptTouched in internal/units/cob_binding.go, bound to the
 // VM because the VM holds no unit pointer.
 //
-// Do NOT re-introduce a deadline here, and do NOT narrow the raise to port 5:
-// retail's marker is raised by every arm of the dispatch, and the transport
-// `BUSY` wait sits on this same gate bit and is woken by port 6
-// ([R-AIR-01 §9] as corrected). The `tick` parameter is deliberately unused —
-// it survives only because five call sites pass it, and its disuse is the
-// contract: this wait sets no deadline.
-func inBuildStanceWait(u *units.Unit, n *Node, extra uint32, _ uint32) Code {
-	if u != nil && u.InBuildStance {
-		return 1
-	}
-	if n != nil {
+// Do NOT re-introduce a deadline in this body, and do NOT narrow the raise to
+// port 5: retail's marker is raised by every arm of the dispatch, and the
+// transport `BUSY` wait sits on this same gate bit and is woken by port 6
+// ([R-AIR-01 §9] as corrected). The retail wait sets no deadline.
+//
+// The rule set is told about every visit after the gate is written, together
+// with the satisfied set and the work position the row's own StartBuilding
+// aimed at. Strict and Community ignore it, so their wait is exactly the one
+// above. Modern arms a long retry deadline beside the gate and re-arranges
+// StartBuilding when it expires, because a StartBuilding whose script found
+// every thread slot taken never raises the stance at all (Nanolathe Modern
+// policy: DESIGN_UNITS_ORDERS_COB "Modern build-stance retry").
+func inBuildStanceWait(u *units.Unit, n *Node, extra, satisfied, tick uint32, workX, workZ numeric.Fixed) Code {
+	ready := u != nil && u.InBuildStance
+	if !ready && n != nil {
 		n.DynamicGate = extra | gateBuildStance
+	}
+	if u != nil && n != nil {
+		rulesOfUnit(u).BuildStanceWait(BuildStanceWaitRequest{
+			Builder: u, Record: n, Ready: ready, Satisfied: satisfied, Tick: tick, WorkX: workX, WorkZ: workZ,
+		})
+	}
+	if ready {
+		return 1
 	}
 	return 2
 }
@@ -637,7 +649,7 @@ func repairUnitHandler(u *units.Unit, n *Node, satisfied uint32, tick uint32) Co
 		EmitStartBuilding(u, n, target.X, target.Z)
 		return 1
 	case 2:
-		return inBuildStanceWait(u, n, pendTargetRemoved, tick)
+		return inBuildStanceWait(u, n, pendTargetRemoved, satisfied, tick, target.X, target.Z)
 	case 3:
 		// Unsigned compare [05 R-WORK-01 §3]; see selfRepairHandler.
 		if target.Def != nil && uint32(target.Health) >= uint32(target.Def.MaxDamage) {
@@ -826,7 +838,7 @@ func helpBuildHandler(u *units.Unit, n *Node, satisfied uint32, tick uint32) Cod
 		EmitStartBuilding(u, n, target.X, target.Z)
 		return 1
 	case 2:
-		return inBuildStanceWait(u, n, gateCancelCurrent|pendTargetRemoved, tick)
+		return inBuildStanceWait(u, n, gateCancelCurrent|pendTargetRemoved, satisfied, tick, target.X, target.Z)
 	case 3:
 		// The construction service owns admission, the shared arithmetic, and
 		// completion posture for the accepted step [05 R-WORK-01 §1].
@@ -1024,7 +1036,7 @@ func captureHandler(u *units.Unit, n *Node, satisfied uint32, tick uint32) Code 
 		EmitStartBuilding(u, n, target.X, target.Z)
 		return 1
 	case 2:
-		return inBuildStanceWait(u, n, pendTargetGone, tick)
+		return inBuildStanceWait(u, n, pendTargetGone, satisfied, tick, target.X, target.Z)
 	case 3:
 		workStatus(u, statusWorking, "") // kind 11 has no default text
 		return 1
@@ -1271,7 +1283,8 @@ func reclaimHandler(u *units.Unit, n *Node, satisfied uint32, tick uint32) Code 
 		EmitStartBuilding(u, n, bx, bz)
 		return 1
 	case 2:
-		return inBuildStanceWait(u, n, 0, tick)
+		bx, bz := featureBoxCentre(cx, cz, def)
+		return inBuildStanceWait(u, n, 0, satisfied, tick, bx, bz)
 	case 3, 4:
 		if n.Phase == 3 {
 			workStatus(u, statusWorking, "") // kind 11, no text, on every visit it stays in phase 3
@@ -1497,7 +1510,8 @@ func resurrectHandler(u *units.Unit, n *Node, satisfied uint32, tick uint32) Cod
 		EmitStartBuilding(u, n, bx, bz)
 		return 1
 	case 2:
-		return inBuildStanceWait(u, n, 0, tick)
+		bx, bz := featureBoxCentre(cx, cz, def)
+		return inBuildStanceWait(u, n, 0, satisfied, tick, bx, bz)
 	case 3:
 		// "Copy the feature record's 64-byte name, truncate it at the first
 		// '_', look the result up in the unit catalogue. Index 0 ->
@@ -1694,7 +1708,7 @@ func GroundUnitReclaimSetup(u *units.Unit, n *Node, target *units.Unit, satisfie
 		EmitStartBuilding(u, n, target.X, target.Z)
 		return 1
 	case 3:
-		return inBuildStanceWait(u, n, 0x10008, tick)
+		return inBuildStanceWait(u, n, 0x10008, satisfied, tick, target.X, target.Z)
 	case 4:
 		workStatus(u, statusWorking, "")
 		return 1

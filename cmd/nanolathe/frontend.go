@@ -1155,6 +1155,9 @@ func (g *gameShell) step(delta float64, cl *client.Client) {
 			if g.leaveReplayPlayback(cl) {
 				return
 			}
+			if battle.serviceReplayTakeover(cl) {
+				return
+			}
 			battle.viewerStep(delta, cl)
 			// The sub-ticks this step released run on the simulation goroutine
 			// from here until the next step joins them (battle_sim.go).

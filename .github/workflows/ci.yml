@@ -315,7 +315,9 @@ jobs:
           name: native-windows-unsigned
           path: |
             build/native/windows-amd64/nanolathe.exe
+            build/native/windows-amd64/nanolathe-launcher.exe
             build/native/windows-arm64/nanolathe.exe
+            build/native/windows-arm64/nanolathe-launcher.exe
           retention-days: 14
           if-no-files-found: error
       - name: keep the release assets
@@ -370,9 +372,17 @@ jobs:
           $report | Select-Object -First 6 | Write-Host
           if (-not ($report -cmatch "^nanolathe: build manifest: $($build.build_manifest)$")) { throw 'The executable does not report the stamped build manifest.' }
           if (-not ($report -cmatch "revision=$($build.revision) \(installed source\)")) { throw 'The executable does not report its source revision.' }
-          $info = (Get-Item -LiteralPath $exe).VersionInfo
-          if ($info.ProductName -cne 'Nanolathe' -or $info.FileVersion -cne $build.version -or $info.ProductVersion -cne $build.version) {
-              throw "Version resource names $($info.ProductName) $($info.FileVersion), expected Nanolathe $($build.version)."
+          $launcher = "$PWD\game\nanolathe-launcher.exe"
+          foreach ($file in @($exe, $launcher)) {
+              $info = (Get-Item -LiteralPath $file).VersionInfo
+              if ($info.ProductName -cne 'Nanolathe' -or $info.FileVersion -cne $build.version -or $info.ProductVersion -cne $build.version) {
+                  throw "$file version resource names $($info.ProductName) $($info.FileVersion), expected Nanolathe $($build.version)."
+              }
+          }
+          # The setup download is the x64 launcher the x64 package carries.
+          $setup = (Get-FileHash -LiteralPath dist/Nanolathe-Setup.exe -Algorithm SHA256).Hash
+          if ($env:TARGET -eq 'windows-amd64' -and $setup -ne (Get-FileHash -LiteralPath $launcher -Algorithm SHA256).Hash) {
+              throw 'Nanolathe-Setup.exe is not the packaged x64 launcher.'
           }
           Write-Host "$env:TARGET reports build manifest $($build.build_manifest) and carries version $($info.FileVersion)."
           exit 0

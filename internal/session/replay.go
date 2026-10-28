@@ -50,6 +50,9 @@ type ReplayRecorder interface {
 // publication, which may run on the simulation goroutine, so it has one.
 type replayState struct {
 	recorder ReplayRecorder
+	// takeover pins the local human after a replay fork. Other recorded
+	// humans remain active, idle seats (DESIGN_MULTIPLAYER §10.1).
+	takeover bool
 	// pumpTicks counts the ticks the current pump has run, for PumpEnded.
 	pumpTicks int
 

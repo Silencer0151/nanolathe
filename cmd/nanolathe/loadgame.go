@@ -610,7 +610,7 @@ func (g *gameShell) writeBattleSave(path, description string) error {
 	// mission's OTA and is deliberately not what a save records
 	// [08 R-SESS-01 §9] [08 R-SKIR-01 §6]. This shell's configured word is the
 	// setup record's, the same word that sizes a fresh or restored battle.
-	summary := session.RetailBattleSummary(sess, description, retailSaveGameID(), g.setup.UnitLimit)
+	summary := session.RetailBattleSummary(sess, description, retailSaveGameID(), g.configuredUnitLimit())
 	// The `Radar Image` box is written on live-battle saves only, and its
 	// raster is presentation's [08 "Summary"]; the session's summary carries
 	// whatever the host supplies here.

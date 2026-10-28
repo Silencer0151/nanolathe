@@ -1,9 +1,12 @@
-# Source installer
+# Installers
 
-The public alpha installer builds the latest commit on `main` on the player's
-computer. It downloads a private Go toolchain and dependencies, creates a
-shortcut, and starts the game. Original Total Annihilation assets are supplied
-by the player. This is Nanolathe host installation policy, not retail behavior.
+On Mac and Linux, the public alpha installer builds the latest commit on
+`main` on the player's computer. It downloads a private Go toolchain and
+dependencies, creates a shortcut, and starts the game. On Windows, the
+installer script installs the Nanolathe launcher from the newest published
+release, and the launcher installs prebuilt builds ("Windows launcher" below);
+nothing is compiled. Original Total Annihilation assets are supplied by the
+player. This is Nanolathe host installation policy, not retail behavior.
 
 ## Install and update
 
@@ -13,13 +16,24 @@ Mac or Linux, in Terminal:
 curl -fsSL https://nanolathe.gg/install.sh | bash
 ```
 
-Windows x64 or ARM64, in PowerShell:
+Windows x64 or ARM64: download `Nanolathe-Setup.exe` from the newest release,
+or in PowerShell:
 
 ```powershell
 & ([scriptblock]::Create((irm https://nanolathe.gg/install.ps1)))
 ```
 
-The shortcut checks the latest commit on `main` at launch. If it
+The PowerShell command finds the newest Latest release, downloads
+`Nanolathe-Setup.exe`, checks it against the release's `SHA256SUMS`, installs
+it as `nanolathe-launcher.exe`, and runs it windowless (`--update`) to install
+the game from the player's channel, never moving an installed build back, and
+the Start Menu shortcut. It then opens the launcher, which keeps the
+game up to date from then on. A Windows installation made by the earlier
+source installer moves to the launcher the first time its update check offers
+**Update & play**: that runs this script, and the new release's `launch.ps1`
+opens the launcher.
+
+On Mac and Linux, the shortcut checks the latest commit on `main` at launch. If it
 differs from the installed release, it offers **Update & play**
 or **Play current version**. The check has a short timeout; an unavailable or
 invalid response leaves the installed game usable. Declining the update also
@@ -46,13 +60,15 @@ the game and rerun that command whenever you want to update manually.
 Supported installer targets: Mac Intel/Apple Silicon (macOS 13 or newer),
 Linux x86-64/ARM64, and Windows x64/ARM64. Linux requires a graphical desktop and the window-system, graphics,
 and audio runtime libraries used by Ebitengine. Go alone builds the desktop
-engine; a separate C compiler is not required. The Windows installer selects a native compiler and engine for the host CPU,
-including when PowerShell itself runs under x64 emulation on ARM64.
+engine; a separate C compiler is not required. The Windows launcher installs
+the build for the host CPU, including when it runs under x64 emulation on ARM64.
 
-These builds have no paid publisher signature. Locally building the game does
-not override OS execution policies. The ordinary Windows SmartScreen dialog may
-offer **More info → Run anyway**; Smart App Control and managed-device policies
-can block it without that option. The installers do not change security policy.
+Locally built games and Latest builds are unsigned; Stable releases will be
+code signed. A downloaded unsigned `Nanolathe-Setup.exe` meets the ordinary
+Windows SmartScreen dialog, which offers **More info → Run anyway**; files the
+PowerShell script and the launcher download do not. Smart App Control and
+managed-device policies can block unsigned programs without that option. The
+installers do not change security policy.
 
 ## Files and shortcuts
 
@@ -60,44 +76,38 @@ can block it without that option. The installers do not change security policy.
 |---|---|---|
 | Mac | `~/Library/Application Support/Nanolathe` | `~/Applications/Nanolathe.app` |
 | Linux | `$XDG_DATA_HOME/nanolathe`, or `~/.local/share/nanolathe` | `$XDG_DATA_HOME/applications/nanolathe.desktop`, or `~/.local/share/applications/nanolathe.desktop` |
-| Windows | `%LOCALAPPDATA%\Nanolathe` | Nanolathe in the user's Start Menu |
+| Windows | `%LOCALAPPDATA%\Nanolathe` | Nanolathe in the user's Start Menu, starting `nanolathe-launcher.exe`; an Apps & Features entry |
 
-The Mac app and Windows Start Menu shortcut use the Nanolathe website's green
-N mark. Their icons, and the Mac update-window script, are copied from the
-resolved source commit; they require no separate download. Every successful
-install or update refreshes the existing Mac app bundle or Windows shortcut.
-The Windows icon stays in its installed release directory, so deleting the
-temporary download and build files cannot remove it.
+The Mac app and Windows launcher use the Nanolathe website's green N mark. The
+Mac icon and update-window script are copied from the resolved source commit;
+they require no separate download. Every successful install or update
+refreshes the existing Mac app bundle. The Windows icon is embedded in the
+launcher, which rewrites its own Start Menu shortcut and Apps & Features entry
+at every start.
 
-The Windows shortcut uses a short, fixed encoded loader and stores the install
-path in its working-directory property. The loader reads `<install>/launch.ps1`,
-which validates `current.txt` and invokes the selected release's launcher. This
-keeps paths and release-selection logic out of the shortcut argument string,
-without changing execution policy. Rerun the installer to refresh an older
-shortcut; updating engine source alone does not replace an installed shortcut.
+The earlier Windows source installer's shortcut ran a fixed encoded PowerShell
+loader that read `<install>/launch.ps1`. The launcher replaces that shortcut
+and rewrites `launch.ps1` to open the launcher, so a copy of the old shortcut
+pinned elsewhere still works.
 
 Within the installation directory:
 
 - `saves`: newly written `.SAV` files.
 - `settings.json`: launcher-specific preferences.
 - `logs`: installation and game diagnostics.
-- `releases`: versioned builds, each with the toolchain `release.txt` manifest and actual `source-revision`.
-- `toolchains` and `cache`: private Go installation, dependencies, and build cache.
+- `releases`: versioned builds. A source build holds the toolchain `release.txt` manifest and actual `source-revision`; a launcher build holds the release's `build.json`, `release-tag` and `source-revision`.
+- `toolchains` and `cache`: private Go installation, dependencies, and build cache (Mac and Linux; the launcher removes them from a Windows installation it adopts).
+- Windows: `nanolathe-launcher.exe` and its `launcher.json` (the chosen channel).
 - Unix `current` symlink or Windows `current.txt`: selected release.
 - Unix `game-root` or Windows `root.txt`: the remembered game-data directory.
 
 The launcher validates and explicitly selects one content root. Several detected
 installations require a selection; they are not automatically overlaid. Missing
 or moved data triggers selection again. Mac app launches use a native picker;
-Terminal/Linux launches can prompt in the terminal. Windows lists numbered
-installations in the PowerShell window: type a number or paste the full game-folder
-path, then press Enter. This prompt appears after installation and from the Start
-Menu shortcut when a choice is needed. Invalid choices can be retried; blank input
-cancels without changing the remembered folder. A single usable detected folder
-is selected automatically. The Windows shortcut explicitly opens a normal
-PowerShell window. It announces startup, update checks, game-folder searches and
-game-data validation before starting that work, and names the update window when
-waiting for an update choice. Startup errors stay visible until Enter is pressed.
+Terminal/Linux launches can prompt in the terminal. A single usable detected
+folder is selected automatically. On Windows the launcher confirms a single
+detected folder, lists several to choose from, and opens the Explorer folder
+picker when it finds none ("Windows launcher" below).
 Starting the installed `nanolathe` executable directly,
 without the shortcut, also uses the remembered folder while it still holds game data.
 `--check-install` validates startup mounts and required products, not
@@ -135,9 +145,11 @@ curl -fsSL https://nanolathe.gg/install.sh | bash -s -- --no-run
 Pass `--root "/path/to/TotalAnnihilation"` on Unix or
 `-Root 'C:\Games\Total Annihilation'` on Windows to select a folder explicitly.
 Unix validates and remembers an explicit root during installation, including
-with `--no-run`; Windows applies `-Root` when launching, so omit `-NoRun` when
-selecting data. Set `NANOLATHE_INSTALL_DIR` to an absolute path to choose another
-installation directory. It does not change the shortcut location.
+with `--no-run`; Windows remembers it, and the launcher validates it before
+playing. Set `NANOLATHE_INSTALL_DIR` to an absolute path to choose another
+installation directory. It does not change the shortcut location. On Windows,
+`NANOLATHE_RELEASES_API` installs a fork's releases instead
+(`https://api.github.com/repos/<owner>/nanolathe`).
 
 On Unix, `<installation directory>/launch.sh --root PATH` changes the remembered
 folder without rebuilding. Removing the remembered-root file on either platform
@@ -146,9 +158,11 @@ directory is appropriate only after confirming no installer is still running.
 
 ## Remove
 
-Close the game, remove its shortcut, and delete the installation directory.
-Copy out any saves/settings you want to keep first. This removes the private
-compiler and cache too. The original TA installation remains separate.
+On Windows, uninstall Nanolathe from **Settings → Apps**; it asks whether to
+keep saves and settings. On Mac and Linux, close the game, remove its shortcut,
+and delete the installation directory. Copy out any saves/settings you want to
+keep first. This removes the private compiler and cache too. The original TA
+installation remains separate.
 
 ## Release maintenance
 
@@ -183,30 +197,27 @@ a separate publisher signature.
    update checks resolve engine `main`; new main commits need no manifest change.
    Prior builds stay installed until the user removes them.
 
-`test-install.ps1` also runs `test-shortcut.ps1`. On native Windows this creates
-temporary production shortcuts and opens the saved `.lnk` through the shell
-in Windows PowerShell 5.1. Shortcut creation uses the Unicode `IShellLinkW`
-interface so both the link file name and its stored paths preserve Unicode.
-Authored release launchers write sentinels, so no game, network, or retail data
-is needed. It covers path quoting/Unicode, a long installation path within
-Windows PowerShell 5.1's ordinary path limits, shortcut refresh before release
-promotion, and selection of a new release without rewriting the shortcut. It
-checks both WSH arguments and `System.Link.Arguments` from the shell property
-store: a shortened WSH readback alone is not evidence that stored arguments or
-execution were truncated (see [Microsoft's GetArguments guidance](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishelllinkw-getarguments)).
-On other platforms the test runs the loader in a child PowerShell process and
-explicitly skips `.lnk` execution and COM checks. That does not establish native
-Windows shortcut behavior; run the Windows x64 and ARM64 installer jobs and a
-desktop Start Menu launch before promoting the fix.
+The Windows script no longer reads the manifest's Go or source entries; it
+installs from the published releases, and its offline test
+(`test-install.ps1`) authors GitHub's answers, the downloads and the
+launcher's `--update`. Its hash in `/install/release.txt` still matters: an
+installation made by the earlier source installer verifies the downloaded
+script against `installer_ps1_sha256` before running it, which is how it moves
+to the launcher. A manual run of the **Source installer** workflow also
+installs from the published releases on the Windows runners (optionally a
+fork's, through `releases_api`) and checks the native build, the launcher and
+its Start Menu shortcut. Shortcut creation is tested in Go
+(`internal/launcher/shell`).
 
-The first install has a cold compiler/dependency cache, so measure its time
-separately from updates. No first-install duration is promised.
+The first Mac or Linux install has a cold compiler/dependency cache, so measure
+its time separately from updates. No first-install duration is promised.
 
 ## Prebuilt native builds
 
 CI also builds release executables, so a launcher can install a build
-instead of compiling one; the installers above do not use them yet.
-`tools/native-build` reproduces these installers' build exactly. It downloads
+instead of compiling one; on Windows the launcher installs them.
+`tools/native-build` reproduces the Mac and Linux installer's build exactly, so
+those players and Windows players share stamps online. It downloads
 the Go release that `/install/release.txt` pins and checks its hash, downloads
 the commit's codeload archive, stamps it with stampgen using the installers'
 build arguments and all six toolchain hashes, then cross-compiles Windows and
@@ -223,19 +234,83 @@ the highest `vX.Y.Z` tag plus the workflow run number, for example
 `0.3.0.412`.
 
 `tools/native-package` writes `nanolathe-windows-{amd64,arm64}.zip` and
-`nanolathe-linux-{amd64,arm64}.tar.gz`. Each holds the executable,
+`nanolathe-linux-{amd64,arm64}.tar.gz`. Each holds the game executable,
 `source-revision` (which the game shows as its revision), `LICENSE` and
-`NOTICE.md`, alongside `build.json` (revision, version, build manifest digest)
-and `SHA256SUMS`. The **native** job runs on every push and pull request and
-keeps the unsigned Windows executables as their own artifact,
-`windows-{amd64,arm64}/nanolathe.exe`, for signing. **native-smoke** starts
-each packaged executable on its own platform and checks that it reports the
-stamp and revision recorded in `build.json`, and that the Windows version
-resource is present. On main, **native-publish** publishes the assets as an
-unsigned `native-<run number>` prerelease (the Latest channel), keeping the
-two newest, through the same release code as the browser build.
+`NOTICE.md`; the Windows zips also hold `nanolathe-launcher.exe`. Beside them
+are `Nanolathe-Setup.exe` (the x64 launcher, which Windows players download),
+`build.json` (revision, version, build manifest digest) and `SHA256SUMS`. The
+**native** job runs on every push and pull request and keeps the unsigned
+Windows executables as their own artifact,
+`windows-{amd64,arm64}/{nanolathe,nanolathe-launcher}.exe`, for signing.
+**native-smoke** starts each packaged game on its own platform and checks that
+it reports the stamp and revision recorded in `build.json`, and that the
+Windows executables carry their version resources. On main,
+**native-publish** publishes the assets as an unsigned `native-<run number>`
+prerelease (the Latest channel), keeping the two newest, through the same
+release code as the browser build.
 
 To test unpushed changes locally, pass `--archive` a tar.gz of the tree whose
 one top directory is `nanolathe-<revision>/`, with `--revision` and
 `--version`. Builds that run on the host check their own stamp, so a Linux
 x64 or Windows x64 host verifies that target.
+
+## Windows launcher
+
+`cmd/nanolathe-launcher` installs, updates and starts prebuilt builds
+(`internal/launcher`). Players download `Nanolathe-Setup.exe`. Its first run
+offers to install into `%LOCALAPPDATA%\Nanolathe` for the current user, with
+no administrator rights. It copies itself there as `nanolathe-launcher.exe`,
+adds the Start Menu shortcut (and a desktop one if chosen), registers a
+per-user Apps & Features entry that uninstalls through `--uninstall`, and
+starts the installed copy. An installed launcher always acts on the folder it
+runs from.
+
+Uninstalling removes the shortcuts, the Apps & Features entry and only the
+files the launcher, the source installers and the game create there: the
+launcher, `releases`, `logs`, the selection and remembered-folder files,
+`launcher.json`, `launch.ps1`, and a source installation's toolchains,
+caches, lock and work directories. Saves, `settings.json` and the Survival
+records stay unless the player asks to delete them too. Anything else in
+the folder is left alone, and the folder itself goes only once it is empty.
+
+At every start the launcher checks its channel. **Stable** is the newest
+published `vX.Y.Z` release with native assets; **Latest** is the
+highest-numbered complete `native-<n>` release. A player who has not chosen
+a channel follows Latest; Stable is an explicit choice. One button reads
+Install, Update or Play. An update downloads the platform's package,
+verifies every file against `SHA256SUMS`, unpacks it into a staging
+directory, checks that the game starts (`--help`), then selects it
+atomically. The previous build is kept, older ones are pruned, and a newer
+launcher shipped in the package replaces the installed one at its next start.
+An offline or failed check leaves the installed build playable. No build is
+signed yet (signed releases are planned), so on a PC where Smart App Control
+is on or evaluating, the launcher warns that Windows may block the game.
+
+The launcher only moves a player forward (`internal/launcher` `Offer`).
+Before it offers or installs a release other than the installed one, it
+reads the release's verified `build.json` and asks the repository's compare
+API how the two source revisions relate
+(`compare/<installed>...<offered>?per_page=1&page=2`; the second one-commit
+page carries the status without the first page's file list, under 20 KB
+instead of up to megabytes). A release ahead of the installed build is
+offered, and one built from the same revision is up to date. One behind it
+or off its history is neither offered nor installed: after switching from
+Latest to an older Stable release, or when the newest `native-<n>` release
+is deleted, the window says the installed build is newer and is kept until
+the channel passes it. A comparison that fails offers nothing, like any
+failed check. A build with no recorded revision updates as before.
+
+The launcher finds Total Annihilation through the game's own discovery
+(`--list-installs`) and validates a folder with `--check-install`. It
+confirms a single result, offers a choice when several are found, and opens
+the Explorer folder picker when none are. It starts the game with the same
+`--root`, `--save-dir` and `NANOLATHE_SETTINGS` as the source installer's
+launcher, and writes its output to `logs/game-*.log`.
+
+It adopts a source installation in place, because the directory layout is
+the same. The first update keeps saves, settings, logs and `root.txt`,
+removes the private Go toolchain and build caches, replaces the Start Menu
+shortcut, and rewrites `launch.ps1` so older pinned shortcuts open the
+launcher. Set `NANOLATHE_RELEASES_API` to another repository's API root, such
+as `https://api.github.com/repos/<owner>/nanolathe`, to try a fork's
+releases.

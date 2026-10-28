@@ -145,6 +145,24 @@ type Rules interface {
 	// resume through the ordinary takeoff preamble instead of taking retail's
 	// carried-guard queue cancellation [04 R-UNIT-06 §1].
 	GuardResumesFromPad(u *units.Unit) bool
+
+	// BuildStanceWait observes one visit of the shared INBUILDSTANCE wait of
+	// the ground work rows [04 R-ORD-01 §1], after the wait has written its
+	// gate. It may add to the record's wait; it never changes the result code.
+	BuildStanceWait(BuildStanceWaitRequest)
+}
+
+// BuildStanceWaitRequest is one visit of the shared INBUILDSTANCE wait. Ready
+// is the stance level the wait read; Satisfied is the set the pump dispatched
+// the record with; WorkX/WorkZ is the work position the row's StartBuilding
+// emission aims at. Rules must not retain it.
+type BuildStanceWaitRequest struct {
+	Builder      *units.Unit
+	Record       *Node
+	Ready        bool
+	Satisfied    uint32
+	Tick         uint32
+	WorkX, WorkZ numeric.Fixed
 }
 
 // ScriptAttackSurfaceFireRequest is one COB script-action ATTACK decision.
@@ -229,6 +247,11 @@ func (StrictRules) GuardWorksNearby(*units.Unit, *Node, uint32) bool { return fa
 // GuardResumesFromPad is retail's answer: a carried guard cancels its whole
 // queue [04 R-UNIT-06 §1].
 func (StrictRules) GuardResumesFromPad(*units.Unit) bool { return false }
+
+// BuildStanceWait is retail's answer: the wait writes its gate and nothing
+// else. It sets no deadline and arranges no second StartBuilding, so only the
+// unit's script writing an engine port wakes the record [04 R-COB-06].
+func (StrictRules) BuildStanceWait(BuildStanceWaitRequest) {}
 
 // rules returns the rule set this binding carries. A binding composed without
 // one answers as Strict 3.1, so a fixture or a reconstructed queue that never

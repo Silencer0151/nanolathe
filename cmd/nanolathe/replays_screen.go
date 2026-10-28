@@ -821,6 +821,8 @@ func (g *gameShell) returnFromReplayPlayback(cl *client.Client) {
 	path := ""
 	if b := g.battle; b != nil && b.playback != nil {
 		path = b.playback.Path()
+	} else if b != nil && b.takeover != nil {
+		path = b.takeover.source.Path()
 	}
 	g.returnFromBattle(cl)
 	g.returnToReplays(path, "")

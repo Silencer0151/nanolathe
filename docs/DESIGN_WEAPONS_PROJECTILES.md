@@ -639,23 +639,81 @@ matter; future movement, enemy resources, reload progress and script readiness
 are not forecast. The scoring constants and 256-unit neighborhood are prototype
 tuning, not historical constants.
 
+**A turret defends what lies behind it (issue #168).** For a shooter that
+cannot move, an enemy weapon whose medium and height gates admit the shooter
+threatens it at the same strength whether or not it is in range now: the
+acquisition gate without its range clause. A raider driving past a turret
+line toward the base therefore keeps its threat while it stays inside the
+turret's own range, instead of scoring 1 and losing the turret to whatever
+can shoot the turret itself. A ground turret still ignores weapons that can
+only engage aircraft. Mobile shooters keep ranking by what can engage them
+now, since they can move out of reach. In head-to-head arena games against
+the ranking without this rule (protocol v3 pools, random starts, sides
+swapped) it is strength-neutral: 49.2% over 192 20-minute games, t90
+[47.5, 50.9], and 50.5% over 192 40-minute games, t90 [45.8, 55.2].
+
 A visible active infector then adds 12000
 ([Modern infector target preference](#modern-infector-target-preference)).
 Add 100 for a preferred category. If reliable incoming damage plus this weapon's
 shot exceeds 120% of remaining health, multiply the score by four fifths. That
 is a **soft overage preference**, never a requirement to reach 120%, and never a
-ban on an indivisible finishing shot. Equal scores choose nearest planar
-whole-world distance, then the lowest unit handle, independently of registry
-order. A still-eligible current target remains until another score is more
-than 25% higher. When the best alternative avoids the current target's
-excessive overage, it bypasses that retention margin; otherwise the 20%
-penalty could be exactly cancelled by the 25% margin. Every selection query is an automatic request, including a
+ban on an indivisible finishing shot.
+
+**Kill speed and hit chance (issue #168).** The score is then weighted by how soon this slot removes the
+target, so a shooter takes the target whose fire it stops soonest rather than
+the strongest threat however long that takes:
+
+- multiply by `64 * 300 / (shots * reloadTicks)`, where `shots` is the whole
+  number of this weapon's effective shots the target's health needs after the
+  reliable incoming damage already promised. Shots this slot has landed bring
+  its own target closer, so a worn-down target holds against a fresh one
+  without a separate commitment rule, and two targets that die to the same
+  number of shots are left to the overage preference above;
+- then, for an unguided weapon (neither `beamweapon` nor `tracks`), multiply
+  by `32 / (32 + travel)`, where `travel` is the distance the target covers at
+  its current speed during the shot's planar flight
+  (`speed * distance / weaponVelocity`). A stationary target keeps the full
+  weight. The shape follows hit rates logged over Modern arena games: cannons
+  and unguided rockets hit 65-72% of stationary ground targets but 32-43% of
+  targets moving at least one unit per tick, while beam weapons hit about 90%
+  and guided missiles 41-52% whatever the target's speed.
+
+Equal scores choose nearest planar whole-world distance, then the lowest unit
+handle, independently of registry order. A still-eligible current target
+remains until another score is more than 25% higher. When the best alternative
+avoids the current target's excessive overage, it bypasses that retention
+margin; otherwise the 20% penalty could be exactly cancelled by the 25% margin.
+Every selection query is an automatic request, including a
 danger response whose attack order temporarily owns a nonautonomous slot;
 the same margin applies there. Selection returns a choice without installing
 it. Explicit commands remain protected by the maintenance scan admission and
-the order policy's provenance checks. Thus a factory is a usable opportunity
-until a real threat enters range, and equivalent threats do not cause aim churn. Modern acquisition
-consumes no sampling or scoring RNG; Strict keeps the exact retail draw order.
+the order policy's provenance checks. An unarmed opportunity such as a
+factory scores far below a threat in range, though kill speed can still put a
+nearly destroyed one first, and equivalent threats do not cause aim churn.
+Modern acquisition consumes no sampling or scoring RNG and changes no
+resource; Strict and Community keep their acquisition and retention
+algorithms and the exact retail draw order.
+
+Measured against the ranking without these two weights, in head-to-head arena
+games where each side used one ranking and sides were swapped (protocol v3
+pools, random starts): 52.9% for the weighted side over 192 20-minute games,
+t90 [48.4, 57.4], and 49.5% over 192 40-minute games, t90 [42.5, 56.5]: no
+measured strength difference. Kill speed without hit chance was weaker in
+40-minute games (42.7% to 47.9% across variants, worse trades in each), and
+using an enemy's damage rate alone as its threat, without the 1000 base, did
+no better.
+
+Kill speed is also what lets a lone turret finish a target. Without it, the
+overage preference marks down every finishing shot that overshoots by more
+than 20%, and bypasses the retention margin, so a turret left a 10-health
+raider for a fresh one and the raider drove through. In a retail probe of
+waves driving past a line of five LLTs (eight placements each, turrets held
+at full health), the ranking without these rules killed 16 of 64 Raiders and
+Strict 25; with kill speed and hit chance 24, and with the turret threat rule
+as well 27. Against A.K.s, 56 of 64 against Strict's 59, where the gap
+is turrets holding fire across a neighbouring turret
+([§2.3.2](#232-modern-friendly-and-feature-obstruction)) and ordinary
+re-ranking, not a target scored as harmless.
 
 **Direct-fire obstruction preference (issue #97).** Automatic ranking prefers
 a candidate without a demonstrated current direct-flight obstruction over a

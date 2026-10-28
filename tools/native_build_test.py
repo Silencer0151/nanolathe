@@ -18,21 +18,19 @@ MANIFEST = "\n".join(["# authored", "version=x", "go_version=1.27.1", *(f"{k}={v
 
 class InstallerParity(unittest.TestCase):
     """Online rooms match players by build stamp, so the release build must
-    stamp and build with exactly the installers' arguments."""
+    stamp and build with exactly the source installer's arguments: Mac and
+    Linux players who build from source play with Windows players who
+    install these executables."""
 
-    def test_build_arguments_match_both_installers(self):
+    def test_build_arguments_match_the_source_installer(self):
         sh = (ROOT / "tools/installer/install.sh").read_text()
-        ps1 = (ROOT / "tools/installer/install.ps1").read_text()
         sh_args = re.search(r"local build_args=\((.*?)\)", sh).group(1)
         self.assertEqual(re.findall(r"'[^']*'|\S+", sh_args), [f"'{a}'" if " " in a else a for a in BUILD_ARGS])
-        ps1_args = re.search(r"\$buildArgs = @\((.*?)\)", ps1).group(1)
-        self.assertEqual(re.findall(r"'([^']*)'", ps1_args), list(BUILD_ARGS))
 
-    def test_variants_match_both_installers(self):
-        for script in ("install.sh", "install.ps1"):
-            text = (ROOT / "tools/installer" / script).read_text()
-            found = set(re.findall(r"(darwin|linux|windows)/(amd64|arm64)/(v1|v8\.0)=", text))
-            self.assertEqual(found, set(VARIANTS), script)
+    def test_variants_match_the_source_installer(self):
+        text = (ROOT / "tools/installer/install.sh").read_text()
+        found = set(re.findall(r"(darwin|linux|windows)/(amd64|arm64)/(v1|v8\.0)=", text))
+        self.assertEqual(found, set(VARIANTS))
 
     def test_stamp_names_every_variant_hash(self):
         args = stamp_arguments(parse_manifest(MANIFEST), "s.tar.gz", "nanolathe-abc/", "src")
@@ -76,6 +74,8 @@ class Package(unittest.TestCase):
             for goos, goarch in native_build.TARGETS:
                 (build / f"{goos}-{goarch}").mkdir(parents=True)
                 (build / f"{goos}-{goarch}" / native_build.executable(goos)).write_bytes(f"{goos}/{goarch}".encode())
+                if goos == "windows":
+                    (build / f"{goos}-{goarch}" / native_build.LAUNCHER).write_bytes(f"launcher {goarch}".encode())
             revision = "a" * 40
             (build / "build.json").write_text(json.dumps({"revision": revision}))
             sums = []
@@ -86,7 +86,10 @@ class Package(unittest.TestCase):
             self.assertEqual([line.split("  ")[1] for line in sums[0].splitlines()], list(ASSETS[:-1]))
             with zipfile.ZipFile(tmp / "one/nanolathe-windows-arm64.zip") as z:
                 self.assertEqual(z.read("nanolathe.exe"), b"windows/arm64")
+                self.assertEqual(z.read(native_build.LAUNCHER), b"launcher arm64")
                 self.assertEqual(z.read("source-revision").decode().strip(), revision)
+            # The download is the x64 launcher, which also runs on ARM64.
+            self.assertEqual((tmp / "one" / native_build.SETUP).read_bytes(), b"launcher amd64")
             with tarfile.open(tmp / "one/nanolathe-linux-amd64.tar.gz") as t:
                 self.assertEqual(t.getmember("nanolathe").mode, 0o755)
                 self.assertEqual(t.extractfile("source-revision").read().decode().strip(), revision)

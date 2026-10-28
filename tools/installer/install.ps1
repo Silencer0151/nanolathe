@@ -6,45 +6,12 @@ param([string]$Root, [switch]$NoRun, [switch]$Help)
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
-function Read-NanolatheManifest([string]$Text) {
-    $values = @{}
-    foreach ($line in ($Text -split "`n")) {
-        $line = $line.TrimEnd("`r")
-        if ($line -eq '' -or $line.StartsWith('#')) { continue }
-        if ($line -cnotmatch '^([a-z][a-z0-9_]*)=([^\r\n]+)$') { throw 'Malformed release manifest line.' }
-        $key, $value = $Matches[1], $Matches[2]
-        if ($values.ContainsKey($key)) { throw "Duplicate release manifest key: $key" }
-        # Future keys remain inert strings; no manifest text is evaluated.
-        $values[$key] = $value
-    }
-    $rules = @{
-        version = '^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$'
-        source_revision = '^[0-9a-f]{40}$'
-        go_version = '^[0-9]+\.[0-9]+\.[0-9]+$'
-    }
-    foreach ($key in @('source_tar_sha256', 'source_zip_sha256', 'go_darwin_arm64_sha256',
-        'go_darwin_amd64_sha256', 'go_linux_amd64_sha256', 'go_linux_arm64_sha256', 'go_windows_amd64_sha256', 'go_windows_arm64_sha256')) {
-        $rules[$key] = '^[0-9a-fA-F]{64}$'
-    }
-    foreach ($key in $rules.Keys) {
-        if (!$values.ContainsKey($key) -or $values[$key] -cnotmatch $rules[$key]) {
-            throw "Missing or invalid release manifest value: $key"
-        }
-    }
-    return $values
-}
-
-function Get-NanolatheMainRevision([int]$TimeoutSeconds = 30) {
-    $path = Join-Path ([IO.Path]::GetTempPath()) ('nanolathe-main-' + [guid]::NewGuid().ToString('N'))
-    try {
-        Get-NanolatheUpdateDownload 'https://api.github.com/repos/nanolathe-gg/nanolathe/commits/main' $path $TimeoutSeconds 'application/vnd.github.sha'
-        $revision = [IO.File]::ReadAllText($path).Trim()
-        if ($revision -cnotmatch '^[0-9a-f]{40}$') { throw 'Invalid main commit returned by GitHub.' }
-        return $revision
-    } finally {
-        if ([IO.File]::Exists($path)) { [IO.File]::Delete($path) }
-    }
-}
+# The script installs the Nanolathe launcher from the newest published
+# release and lets it install the game (tools/installer/README.md
+# "Windows launcher"). Nothing is compiled.
+$NanolatheReleasesApi = 'https://api.github.com/repos/nanolathe-gg/nanolathe'
+$NanolatheSetupAsset = 'Nanolathe-Setup.exe'
+$NanolatheLauncherName = 'nanolathe-launcher.exe'
 
 function Resolve-NanolatheWindowsArchitecture([int[]]$NativeArchitectures, [bool]$Is64BitProcess) {
     if (!$Is64BitProcess) { throw 'Run 64-bit PowerShell to install Nanolathe.' }
@@ -61,21 +28,58 @@ function Test-NanolatheChecksum([string]$Path, [string]$Expected) {
     }
 }
 
-function Get-NanolatheDownload([string]$Url, [string]$Path, [string]$Hash) {
-    Write-Host "Downloading $Url"
-    Invoke-WebRequest -UseBasicParsing -Uri $Url -OutFile $Path -TimeoutSec 600
-    Write-Host 'Download complete; verifying SHA-256...'
-    Test-NanolatheChecksum $Path $Hash
+# Read-NanolatheChecksums reads SHA256SUMS ("<hex>  <name>" lines) as data.
+function Read-NanolatheChecksums([string]$Text) {
+    $sums = @{}
+    foreach ($line in ($Text -split "`n")) {
+        $line = $line.TrimEnd("`r")
+        if ($line -eq '') { continue }
+        if ($line -cnotmatch '^([0-9a-fA-F]{64})  ([A-Za-z0-9][A-Za-z0-9._-]*)$') { throw 'Malformed SHA256SUMS line.' }
+        if ($sums.ContainsKey($Matches[2])) { throw "SHA256SUMS lists $($Matches[2]) twice." }
+        $sums[$Matches[2]] = $Matches[1]
+    }
+    return $sums
 }
 
-function Expand-NanolatheArchive([string]$Archive, [string]$Destination) {
-    Write-Host "Extracting archive: $Archive"
-    # Use the Framework ZIP implementation to avoid per-entry PowerShell
-    # overhead. Callers supply a fresh directory inside the temporary workspace.
-    Add-Type -AssemblyName System.IO.Compression
-    Add-Type -AssemblyName System.IO.Compression.FileSystem
-    [IO.Compression.ZipFile]::ExtractToDirectory($Archive, $Destination)
-    Write-Host 'Extraction complete.'
+function Test-NanolatheReleaseAssets($Release) {
+    $names = @($Release.assets | ForEach-Object { $_.name })
+    return (!$Release.draft -and $names -ccontains $NanolatheSetupAsset -and $names -ccontains 'SHA256SUMS')
+}
+
+# Select-NanolatheRelease picks the release whose launcher to install: the
+# highest-numbered complete native-<run> prerelease, Latest, which a player
+# who has not chosen a channel follows. The launcher then installs the game
+# from the player's channel and takes the launcher that build ships.
+function Select-NanolatheRelease($Releases) {
+    $best = $null
+    $bestRun = -1
+    foreach ($release in $Releases) {
+        if ($release.tag_name -cnotmatch '^native-([0-9]{1,9})$') { continue }
+        $run = [int]$Matches[1]
+        if ($run -gt $bestRun -and (Test-NanolatheReleaseAssets $release)) { $best, $bestRun = $release, $run }
+    }
+    if ($null -eq $best) { throw 'No published Nanolathe release carries the Windows launcher yet.' }
+    return $best
+}
+
+function Get-NanolatheAssetUrl($Release, [string]$Name) {
+    foreach ($asset in $Release.assets) {
+        if ($asset.name -ceq $Name) {
+            $url = [string]$asset.browser_download_url
+            if (([uri]$url).Scheme -ne 'https') { throw "Refusing a download without HTTPS: $url" }
+            return $url
+        }
+    }
+    throw "Release $($Release.tag_name) has no $Name."
+}
+
+function Get-NanolatheJson([string]$Url) {
+    Invoke-RestMethod -UseBasicParsing -Uri $Url -TimeoutSec 60 -Headers @{ 'User-Agent' = 'Nanolathe-installer'; 'Accept' = 'application/vnd.github+json' }
+}
+
+function Get-NanolatheDownload([string]$Url, [string]$Path) {
+    Write-Host "Downloading $Url"
+    Invoke-WebRequest -UseBasicParsing -Uri $Url -OutFile $Path -TimeoutSec 600 -Headers @{ 'User-Agent' = 'Nanolathe-installer' }
 }
 
 function Write-NanolatheData([string]$Path, [string]$Value) {
@@ -92,373 +96,53 @@ function Write-NanolatheData([string]$Path, [string]$Value) {
     }
 }
 
-function Publish-NanolatheRelease([string]$Base, [string]$Stage, [string]$Name, [scriptblock]$Verify, [scriptblock]$PrepareLauncher = {}) {
-    # The verifier must finish successfully before touching the active pointer.
-    & $Verify (Join-Path $Stage 'nanolathe.exe') | Out-Host
-    $destination = Join-Path (Join-Path $Base 'releases') $Name
-    & $PrepareLauncher $destination | Out-Host
-    [IO.Directory]::Move($Stage, $destination)
-    Write-NanolatheData (Join-Path $Base 'current.txt') $Name
+# Install-NanolatheLauncher puts a verified launcher in the installation. A
+# launcher already there may be running; Windows lets a running program be
+# renamed but not replaced, so it is moved aside, as the launcher itself does.
+function Install-NanolatheLauncher([string]$Base, [string]$Source) {
+    $destination = Join-Path $Base $NanolatheLauncherName
+    $old = "$destination.old"
+    if ([IO.File]::Exists($old)) { Remove-Item -LiteralPath $old -Force -ErrorAction SilentlyContinue }
+    if ([IO.File]::Exists($destination)) { [IO.File]::Move($destination, $old) }
+    try { [IO.File]::Copy($Source, $destination) }
+    catch {
+        if ([IO.File]::Exists($old) -and ![IO.File]::Exists($destination)) { [IO.File]::Move($old, $destination) }
+        throw
+    }
     return $destination
 }
 
-# Launch-time updates are host installation policy; see tools/installer/README.md.
-function Get-NanolatheUpdateDownload([string]$Url, [string]$Path, [int]$TimeoutSeconds, [string]$Accept = 'application/octet-stream') {
-    Add-Type -AssemblyName System.Net.Http
-    $handler = New-Object Net.Http.HttpClientHandler
-    # The public endpoints are fixed HTTPS URLs. A redirect is a failed check.
-    $handler.AllowAutoRedirect = $false
-    $client = New-Object Net.Http.HttpClient($handler)
-    $client.DefaultRequestHeaders.UserAgent.ParseAdd('Nanolathe-installer')
-    $client.DefaultRequestHeaders.Accept.ParseAdd($Accept)
-    $client.DefaultRequestHeaders.CacheControl = New-Object Net.Http.Headers.CacheControlHeaderValue
-    $client.DefaultRequestHeaders.CacheControl.NoCache = $true
-    $response = $null
-    $tlsBefore = [Net.ServicePointManager]::SecurityProtocol
-    try {
-        [Net.ServicePointManager]::SecurityProtocol = $tlsBefore -bor [Net.SecurityProtocolType]::Tls12
-        $client.Timeout = [TimeSpan]::FromSeconds($TimeoutSeconds)
-        $request = $client.GetAsync($Url)
-        # Bound the caller's wait as well, including slow name resolution.
-        if (!$request.Wait($TimeoutSeconds * 1000)) { throw 'Update download timed out.' }
-        $response = $request.GetAwaiter().GetResult()
-        [void]$response.EnsureSuccessStatusCode()
-        $bytes = $response.Content.ReadAsByteArrayAsync().GetAwaiter().GetResult()
-        [IO.File]::WriteAllBytes($Path, $bytes)
-    } finally {
-        if ($response) { $response.Dispose() }
-        $client.Dispose()
-        [Net.ServicePointManager]::SecurityProtocol = $tlsBefore
-    }
+# Invoke-NanolatheLauncherUpdate runs the launcher's windowless --update,
+# which installs or updates the game, adopts a source installation and
+# writes the Start Menu entry, and returns its exit code. Its report is
+# shown here and kept in logs/launcher-update-*.log.
+function Invoke-NanolatheLauncherUpdate([string]$Launcher, [string]$Work) {
+    $report = Join-Path $Work 'launcher-update.txt'
+    $process = Start-Process -FilePath $Launcher -ArgumentList '--update' -WorkingDirectory (Split-Path $Launcher) `
+        -RedirectStandardError $report -NoNewWindow -Wait -PassThru
+    if ([IO.File]::Exists($report)) { Get-Content -LiteralPath $report | ForEach-Object { Write-Host $_ } }
+    return $process.ExitCode
 }
 
-function Confirm-NanolatheUpdate([string]$Version) {
-    if (![Environment]::UserInteractive -or
-        @([Environment]::GetCommandLineArgs() | Where-Object { $_ -match '^-noni' }).Count -gt 0) { return $false }
-    try {
-        Write-Host 'An update is available. Choose Update & play or Play current version in the Nanolathe update window.'
-        Add-Type -AssemblyName System.Windows.Forms
-        $dialog = New-Object Windows.Forms.Form
-        try {
-            $dialog.AutoScaleDimensions = New-Object Drawing.SizeF(96, 96)
-            $dialog.AutoScaleMode = [Windows.Forms.AutoScaleMode]::Dpi
-            $dialog.Text = 'Nanolathe update'
-            $dialog.ClientSize = New-Object Drawing.Size(450, 140)
-            $dialog.StartPosition = 'CenterScreen'
-            $dialog.FormBorderStyle = 'FixedDialog'
-            $dialog.MaximizeBox = $false
-            $dialog.MinimizeBox = $false
-            $label = New-Object Windows.Forms.Label
-            $label.Text = "A new Nanolathe build ($Version) is available."
-            $label.SetBounds(20, 20, 410, 40)
-            $update = New-Object Windows.Forms.Button
-            $update.Text = 'Update && play'
-            $update.SetBounds(20, 85, 190, 32)
-            $update.DialogResult = [Windows.Forms.DialogResult]::OK
-            $current = New-Object Windows.Forms.Button
-            $current.Text = 'Play current version'
-            $current.SetBounds(230, 85, 200, 32)
-            $current.DialogResult = [Windows.Forms.DialogResult]::Cancel
-            $dialog.Controls.AddRange(@($label, $update, $current))
-            $dialog.AcceptButton = $current
-            $dialog.CancelButton = $current
-            return ($dialog.ShowDialog() -eq [Windows.Forms.DialogResult]::OK)
-        } finally { $dialog.Dispose() }
-    } catch {
-        # Headless and redirected launches always retain the working build.
-        if ([Console]::IsInputRedirected) { return $false }
-        try {
-            $answer = Read-Host "A new Nanolathe build ($Version) is available. [u] Update & play / [Enter] Play current version"
-            return ($answer -ieq 'u')
-        } catch { return $false }
-    }
-}
-
-function Invoke-NanolatheUpdate([string]$Base, [string]$Release) {
-    if ($env:NANOLATHE_SKIP_UPDATE_CHECK -eq '1') { return $null }
-    Write-Host 'Checking for Nanolathe updates...'
-    $temporary = $null
-    $installDirBefore = [Environment]::GetEnvironmentVariable('NANOLATHE_INSTALL_DIR', 'Process')
-    $ProgressPreference = 'SilentlyContinue'
-    try {
-        $selected = Join-Path (Join-Path $Base 'releases') $Release
-        $installed = Read-NanolatheManifest ([IO.File]::ReadAllText((Join-Path $selected 'release.txt')))
-        $temporary = Join-Path ([IO.Path]::GetTempPath()) ('nanolathe-update-' + [guid]::NewGuid().ToString('N'))
-        [void][IO.Directory]::CreateDirectory($temporary)
-        $manifestPath = Join-Path $temporary 'release.txt'
-        Get-NanolatheUpdateDownload 'https://nanolathe.gg/install/release.txt' $manifestPath 3
-        $available = Read-NanolatheManifest ([IO.File]::ReadAllText($manifestPath))
-        $installedRevision = $installed.source_revision
-        $revisionPath = Join-Path $selected 'source-revision'
-        if ([IO.File]::Exists($revisionPath)) {
-            $installedRevision = [IO.File]::ReadAllText($revisionPath).Trim()
-            if ($installedRevision -cnotmatch '^[0-9a-f]{40}$') { throw 'Invalid installed commit.' }
-        }
-        $revision = Get-NanolatheMainRevision 3
-        if ($revision -ceq $installedRevision) { return $null }
-        if (!$available.ContainsKey('installer_ps1_sha256') -or $available.installer_ps1_sha256 -cnotmatch '^[0-9a-fA-F]{64}$') {
-            throw 'Missing or invalid installer checksum.'
-        }
-        if (!(Confirm-NanolatheUpdate ('main-' + $revision.Substring(0,12)))) { return $null }
-        Write-Host 'Updating Nanolathe. The build may take several minutes...'
-        $installerPath = Join-Path $temporary 'install.ps1'
-        Get-NanolatheUpdateDownload 'https://nanolathe.gg/install.ps1' $installerPath 60
-        # Hash the downloaded bytes, preserving any BOM and CRLF line endings.
-        Test-NanolatheChecksum $installerPath $available.installer_ps1_sha256
-        [Environment]::SetEnvironmentVariable('NANOLATHE_INSTALL_DIR', $Base, 'Process')
-        & ([scriptblock]::Create([IO.File]::ReadAllText($installerPath))) -NoRun | Out-Host
-        $next = [IO.File]::ReadAllText((Join-Path $Base 'current.txt'))
-        if ($next -cnotmatch '^[A-Za-z0-9][A-Za-z0-9._-]+$' -or $next -ceq $Release) { throw 'Update did not select a new build.' }
-        $destination = Join-Path (Join-Path $Base 'releases') $next
-        $launcher = Join-Path $destination 'launch.ps1'
-        if (![IO.File]::Exists($launcher) -or ![IO.File]::Exists((Join-Path $destination 'nanolathe.exe'))) { throw 'Updated build is incomplete.' }
-        return $launcher
-    } catch {
-        Write-Host "Update unavailable: $($_.Exception.Message) Playing the current version."
-        return $null
-    } finally {
-        [Environment]::SetEnvironmentVariable('NANOLATHE_INSTALL_DIR', $installDirBefore, 'Process')
-        if ($temporary -and [IO.Directory]::Exists($temporary)) { Remove-Item -LiteralPath $temporary -Recurse -Force -ErrorAction SilentlyContinue }
-    }
-}
-
-function Get-NanolatheLauncher {
-    $template = @'
-[CmdletBinding()]
-param([Parameter(Mandatory=$true)][string]$Base, [string]$Root)
-UPDATE_HELPERS
-Set-StrictMode -Version 2.0
-$ErrorActionPreference = 'Stop'
-$settingsBefore = [Environment]::GetEnvironmentVariable('NANOLATHE_SETTINGS', 'Process')
-$log = Join-Path $Base ('logs\game-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '.log')
-try {
-    Write-Host "Preparing Nanolathe. Log: $log"
-    $release = [IO.File]::ReadAllText((Join-Path $Base 'current.txt'))
-    if ($release -cnotmatch '^[A-Za-z0-9][A-Za-z0-9._-]+$') { throw 'Invalid current release pointer.' }
-    $exe = Join-Path (Join-Path (Join-Path $Base 'releases') $release) 'nanolathe.exe'
-    if (!(Test-Path -LiteralPath $exe -PathType Leaf)) { throw 'The installed game is missing. Rerun the installer.' }
-    $updatedLauncher = Invoke-NanolatheUpdate $Base $release
-    if ($updatedLauncher) {
-        $skipBefore = [Environment]::GetEnvironmentVariable('NANOLATHE_SKIP_UPDATE_CHECK', 'Process')
-        try {
-            [Environment]::SetEnvironmentVariable('NANOLATHE_SKIP_UPDATE_CHECK', '1', 'Process')
-            & ([scriptblock]::Create([IO.File]::ReadAllText($updatedLauncher))) -Base $Base -Root $Root
-        } finally { [Environment]::SetEnvironmentVariable('NANOLATHE_SKIP_UPDATE_CHECK', $skipBefore, 'Process') }
-        return
-    }
-    $remembered = Join-Path $Base 'root.txt'
-    $explicitRoot = ![string]::IsNullOrWhiteSpace($Root)
-    if (!$explicitRoot -and [IO.File]::Exists($remembered)) { $Root = [IO.File]::ReadAllText($remembered) }
-    function Test-GameRoot([string]$Candidate) {
-        if ([string]::IsNullOrWhiteSpace($Candidate) -or !(Test-Path -LiteralPath $Candidate -PathType Container)) { return $false }
-        Write-Host "Checking Total Annihilation game data: $Candidate"
-        $ErrorActionPreference = 'Continue'
-        & $exe --check-install --root $Candidate 2>&1 | ForEach-Object {
-            [IO.File]::AppendAllText($log, $_.ToString() + [Environment]::NewLine)
-        }
-        return ($LASTEXITCODE -eq 0)
-    }
-    if (!(Test-GameRoot $Root)) {
-        if ($explicitRoot) { throw "The selected Total Annihilation folder is not usable: $Root. See $log" }
-        $Root = ''
-        Write-Host 'Searching for Total Annihilation installations...'
-        $ErrorActionPreference = 'Continue'
-        $discovery = @(& $exe --list-installs 2>&1)
-        $discoveryExit = $LASTEXITCODE
-        $ErrorActionPreference = 'Stop'
-        if ($discoveryExit -gt 1) { throw "Game discovery failed. See $log" }
-        $candidates = @($discovery | ForEach-Object {
-            if ($_ -is [Management.Automation.ErrorRecord]) {
-                [IO.File]::AppendAllText($log, $_.ToString() + [Environment]::NewLine)
-            } elseif (![string]::IsNullOrWhiteSpace($_)) { $_ }
-        })
-        if ($candidates.Count -eq 1 -and (Test-GameRoot $candidates[0])) { $Root = $candidates[0] }
-        else {
-            # Both the installer and Start Menu shortcut have a console. Keep
-            # selection there: an unowned folder dialog can leave that console
-            # waiting with no visible way to choose (issue #112).
-            Write-Host 'Choose one Total Annihilation installation. Game assets are not included.'
-            for ($i = 0; $i -lt $candidates.Count; $i++) {
-                Write-Host ('  {0}) {1}' -f ($i + 1), $candidates[$i])
-            }
-            $prompt = 'Paste the full game-folder path, then press Enter (blank to cancel)'
-            if ($candidates.Count -gt 0) {
-                $prompt = 'Type an installation number or paste the full game-folder path, then press Enter (blank to cancel)'
-            }
-            while ([string]::IsNullOrWhiteSpace($Root)) {
-                $answer = Read-Host $prompt
-                if ([string]::IsNullOrWhiteSpace($answer)) {
-                    Write-Host 'No game folder selected. Launch Nanolathe again to choose.'
-                    return
-                }
-                $candidate = $answer.Trim()
-                if ($candidate -match '^[0-9]+$') {
-                    $number = 0
-                    if (![int]::TryParse($candidate, [ref]$number) -or $number -lt 1 -or $number -gt $candidates.Count) {
-                        Write-Host 'Choose a number from the list or paste the full game-folder path.'
-                        continue
-                    }
-                    $candidate = $candidates[$number - 1]
-                } elseif (($candidate.StartsWith('"') -and $candidate.EndsWith('"')) -or
-                    ($candidate.StartsWith("'") -and $candidate.EndsWith("'"))) {
-                    if ($candidate.Length -ge 2) { $candidate = $candidate.Substring(1, $candidate.Length - 2) }
-                }
-                if (Test-GameRoot $candidate) { $Root = $candidate }
-                else { Write-Host "That folder is not a usable Total Annihilation installation. Choose again. Details: $log" }
-            }
-        }
-    }
-    [IO.File]::WriteAllText($remembered, $Root, (New-Object Text.UTF8Encoding($false)))
-    [Environment]::SetEnvironmentVariable('NANOLATHE_SETTINGS', (Join-Path $Base 'settings.json'), 'Process')
-    Write-Host "Starting Nanolathe. Log: $log"
-    $ErrorActionPreference = 'Continue'
-    & $exe --root $Root --save-dir (Join-Path $Base 'saves') 2>&1 | ForEach-Object {
-        $message = $_.ToString()
-        [IO.File]::AppendAllText($log, $message + [Environment]::NewLine)
-        Write-Host $message
-    }
-    $gameExit = $LASTEXITCODE
-    $ErrorActionPreference = 'Stop'
-    if ($gameExit -ne 0) { throw "Nanolathe exited with code $gameExit. See $log" }
-} catch {
-    Write-Host "Nanolathe: $($_.Exception.Message)" -ForegroundColor Red
-    Write-Host "Log: $log"
-    if ([Environment]::UserInteractive) { [void](Read-Host 'Press Enter to close') }
-    throw
-} finally {
-    [Environment]::SetEnvironmentVariable('NANOLATHE_SETTINGS', $settingsBefore, 'Process')
-}
-'@
-    $helpers = foreach ($name in @('Read-NanolatheManifest', 'Test-NanolatheChecksum',
-        'Get-NanolatheUpdateDownload', 'Get-NanolatheMainRevision', 'Confirm-NanolatheUpdate', 'Invoke-NanolatheUpdate')) {
-        "function $name {`n" + (Get-Item "function:$name").Definition + "`n}"
-    }
-    return $template.Replace('UPDATE_HELPERS', ($helpers -join "`n"))
-}
-
-function Get-NanolatheBootstrap {
-    # Keep release selection out of the shortcut's length-sensitive arguments.
-    # This stable loader still follows current.txt after each successful update.
+# A source installer's update check runs this script with -NoRun and then
+# starts releases/<selected>/launch.ps1. That loader now opens the launcher,
+# which has replaced the shortcut, so the player's next start is the
+# launcher's own.
+function Get-NanolatheReleaseLoader {
     return @'
-param([Parameter(Mandatory=$true)][string]$Base)
-$ErrorActionPreference = 'Stop'
-$release = [IO.File]::ReadAllText((Join-Path $Base 'current.txt'))
-if ($release -cnotmatch '^[A-Za-z0-9][A-Za-z0-9._-]+$') { throw 'Invalid current release pointer.' }
-$launcher = Join-Path (Join-Path (Join-Path $Base 'releases') $release) 'launch.ps1'
-& ([scriptblock]::Create([IO.File]::ReadAllText($launcher))) -Base $Base
+param([string]$Base, [string]$Root)
+# The Nanolathe launcher replaced the source installer; open it.
+Start-Process -FilePath (Join-Path $Base 'nanolathe-launcher.exe') -WorkingDirectory $Base
 '@
 }
 
-function Get-NanolatheLaunchCommand {
-    # The shortcut supplies Base as the working directory, never as source text.
-    # Use the OS directory (not PowerShell's independent provider location).
-    # Only this fixed loader is encoded; no cmd.exe or execution-policy changes.
-    $command = @'
-$ErrorActionPreference='Stop'
-try {
-    Write-Host 'Opening Nanolathe...'
-    $b=[Environment]::CurrentDirectory
-    & ([scriptblock]::Create([IO.File]::ReadAllText((Join-Path $b 'launch.ps1')))) -Base $b
-} catch { Write-Host $_ -ForegroundColor Red; [void](Read-Host 'Press Enter to close'); exit 1 }
-'@
-    return '-NoProfile -STA -WindowStyle Normal -EncodedCommand ' + [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
-}
-
-function Set-NanolatheShortcutProperties($Shortcut, [string]$Base, [string]$Release) {
-    $Shortcut.TargetPath = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
-    $Shortcut.Arguments = Get-NanolatheLaunchCommand
-    $Shortcut.WorkingDirectory = $Base
-    $Shortcut.WindowStyle = 1
-    $Shortcut.Description = 'Play Nanolathe using your Total Annihilation game assets'
-    # The icon lives beside the selected release, outside the temporary build.
-    $Shortcut.IconLocation = (Join-Path $Release 'Nanolathe.ico') + ',0'
-}
-
-function Initialize-NanolatheShortcutInterop {
-    if ('Nanolathe.WindowsShortcut' -as [type]) { return }
-    # Use IShellLinkW and IPersistFile directly. WSH loses characters outside
-    # the ANSI code page in both path properties and the shortcut file name.
-    # These are built-in Windows COM APIs, compiled by PowerShell's Add-Type.
-    Add-Type -TypeDefinition @'
-using System;
-using System.Text;
-using System.Runtime.InteropServices;
-using System.Runtime.InteropServices.ComTypes;
-namespace Nanolathe {
-    [ComImport, Guid("00021401-0000-0000-C000-000000000046")]
-    internal class ShellLink { }
-    [ComImport, Guid("000214F9-0000-0000-C000-000000000046"),
-     InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-    internal interface IShellLinkW {
-        void GetPath([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder path, int count, IntPtr data, uint flags);
-        void GetIDList(out IntPtr list);
-        void SetIDList(IntPtr list);
-        void GetDescription([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder text, int count);
-        void SetDescription([MarshalAs(UnmanagedType.LPWStr)] string text);
-        void GetWorkingDirectory([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder path, int count);
-        void SetWorkingDirectory([MarshalAs(UnmanagedType.LPWStr)] string path);
-        void GetArguments([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder text, int count);
-        void SetArguments([MarshalAs(UnmanagedType.LPWStr)] string text);
-        void GetHotkey(out ushort hotkey);
-        void SetHotkey(ushort hotkey);
-        void GetShowCmd(out int command);
-        void SetShowCmd(int command);
-        void GetIconLocation([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder path, int count, out int index);
-        void SetIconLocation([MarshalAs(UnmanagedType.LPWStr)] string path, int index);
-        void SetRelativePath([MarshalAs(UnmanagedType.LPWStr)] string path, uint reserved);
-        void Resolve(IntPtr window, uint flags);
-        void SetPath([MarshalAs(UnmanagedType.LPWStr)] string path);
-    }
-    public sealed class WindowsShortcut {
-        public string TargetPath { get; set; }
-        public string Arguments { get; set; }
-        public string WorkingDirectory { get; set; }
-        public int WindowStyle { get; set; }
-        public string Description { get; set; }
-        public string IconLocation { get; set; }
-        public void Save(string path) {
-            var link = (IShellLinkW)new ShellLink();
-            try {
-                link.SetPath(TargetPath);
-                link.SetArguments(Arguments);
-                link.SetWorkingDirectory(WorkingDirectory);
-                link.SetShowCmd(WindowStyle);
-                link.SetDescription(Description);
-                int comma = IconLocation.LastIndexOf(',');
-                link.SetIconLocation(IconLocation.Substring(0, comma),
-                    int.Parse(IconLocation.Substring(comma + 1), System.Globalization.CultureInfo.InvariantCulture));
-                ((IPersistFile)link).Save(path, true);
-            } finally { Marshal.ReleaseComObject(link); }
-        }
-        public static WindowsShortcut Read(string path) {
-            var link = (IShellLinkW)new ShellLink();
-            try {
-                ((IPersistFile)link).Load(path, 0);
-                var result = new WindowsShortcut();
-                var text = new StringBuilder(32768);
-                link.GetPath(text, text.Capacity, IntPtr.Zero, 0); result.TargetPath = text.ToString();
-                text.Clear(); link.GetArguments(text, text.Capacity); result.Arguments = text.ToString();
-                text.Clear(); link.GetWorkingDirectory(text, text.Capacity); result.WorkingDirectory = text.ToString();
-                text.Clear(); link.GetDescription(text, text.Capacity); result.Description = text.ToString();
-                int value; link.GetShowCmd(out value); result.WindowStyle = value;
-                text.Clear(); link.GetIconLocation(text, text.Capacity, out value);
-                result.IconLocation = text.ToString() + "," + value.ToString(System.Globalization.CultureInfo.InvariantCulture);
-                return result;
-            } finally { Marshal.ReleaseComObject(link); }
-        }
-    }
-}
-'@
-}
-
-function Write-NanolatheShortcut([string]$Path, [string]$Base, [string]$Release) {
-    # Atomic replacement leaves existing shortcuts usable while preparing an
-    # update. The bootstrap reads the old pointer until promotion succeeds.
-    Write-NanolatheData (Join-Path $Base 'launch.ps1') (Get-NanolatheBootstrap)
-    Initialize-NanolatheShortcutInterop
-    $shortcut = New-Object Nanolathe.WindowsShortcut
-    Set-NanolatheShortcutProperties $shortcut $Base $Release
-    $shortcut.Save($Path)
+function Write-NanolatheReleaseLoader([string]$Base) {
+    $current = [IO.File]::ReadAllText((Join-Path $Base 'current.txt')).Trim()
+    if ($current -cnotmatch '^[A-Za-z0-9][A-Za-z0-9._-]+$') { throw 'Invalid current release pointer.' }
+    $release = Join-Path (Join-Path $Base 'releases') $current
+    if (![IO.File]::Exists((Join-Path $release 'nanolathe.exe'))) { throw 'The launcher did not install a game.' }
+    Write-NanolatheData (Join-Path $release 'launch.ps1') (Get-NanolatheReleaseLoader)
+    return $release
 }
 
 function Invoke-NanolatheInstaller {
@@ -467,156 +151,73 @@ function Invoke-NanolatheInstaller {
     $ProgressPreference = 'SilentlyContinue'
     if ($Help) {
         Write-Host @'
-Nanolathe source installer for x64 and ARM64 Windows (PowerShell 5.1 or later).
+Nanolathe installer for x64 and ARM64 Windows (PowerShell 5.1 or later).
 Usage: & ([scriptblock]::Create((irm https://nanolathe.gg/install.ps1))) [-Root PATH] [-NoRun]
-Rerun the same command to update. -NoRun skips game-folder selection and launch.
+Installs the Nanolathe launcher from the newest published release, then the game.
+The launcher keeps both up to date. -NoRun installs without opening it.
+-Root remembers a Total Annihilation folder; the launcher checks it before playing.
 Set NANOLATHE_INSTALL_DIR to override the default LOCALAPPDATA\Nanolathe folder.
-Builds the latest commit on main with a checksum-verified private Go compiler. Original game assets are required to play.
+Original game assets are required to play.
 '@
         return
     }
     if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) { throw 'This installer supports Windows only.' }
     $nativeArchitectures = @(Get-CimInstance -ClassName Win32_Processor | Select-Object -ExpandProperty Architecture)
-    $goArch = Resolve-NanolatheWindowsArchitecture $nativeArchitectures ([Environment]::Is64BitProcess)
+    [void](Resolve-NanolatheWindowsArchitecture $nativeArchitectures ([Environment]::Is64BitProcess))
     $base = $env:NANOLATHE_INSTALL_DIR
     if ([string]::IsNullOrWhiteSpace($base)) { $base = Join-Path $env:LOCALAPPDATA 'Nanolathe' }
     $base = [IO.Path]::GetFullPath($base)
-    foreach ($folder in @('', 'logs', 'saves', 'releases', 'toolchains', 'cache', 'cache\gopath', 'cache\build')) {
+    # releases marks the folder as an installation, so the launcher acts on it.
+    foreach ($folder in @('', 'logs', 'releases')) {
         [void][IO.Directory]::CreateDirectory((Join-Path $base $folder))
     }
-    $lock = $null
-    $stage = $null
+    $api = $NanolatheReleasesApi
+    if (![string]::IsNullOrWhiteSpace($env:NANOLATHE_RELEASES_API)) { $api = $env:NANOLATHE_RELEASES_API.TrimEnd('/') }
     $work = $null
     $transcribing = $false
+    $launcher = Join-Path $base $NanolatheLauncherName
     $log = Join-Path $base ('logs\install-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '.log')
     $tlsBefore = [Net.ServicePointManager]::SecurityProtocol
-    $savedEnvironment = @{}
     try {
-        $lock = [IO.File]::Open((Join-Path $base 'install.lock'), 'OpenOrCreate', 'ReadWrite', 'None')
         Start-Transcript -LiteralPath $log | Out-Null
         $transcribing = $true
         Write-Host "Installing Nanolathe into $base"
         [Net.ServicePointManager]::SecurityProtocol = $tlsBefore -bor [Net.SecurityProtocolType]::Tls12
-        Write-Host 'Downloading release manifest...'
-        $manifestText = (Invoke-WebRequest -UseBasicParsing -Uri 'https://nanolathe.gg/install/release.txt' -TimeoutSec 60).Content
-        $manifest = Read-NanolatheManifest $manifestText
-        $revision = Get-NanolatheMainRevision
-        $version = 'main-' + $revision.Substring(0,12)
-        Write-Host "Building main commit: $revision"
+        Write-Host 'Finding the newest Nanolathe release...'
+        $release = Select-NanolatheRelease (Get-NanolatheJson "$api/releases?per_page=50")
+        Write-Host "Using the launcher from release $($release.tag_name)"
         $work = Join-Path $base ('work-' + [guid]::NewGuid().ToString('N'))
         [void][IO.Directory]::CreateDirectory($work)
-        $goHash = $manifest["go_windows_${goArch}_sha256"]
-        $toolchainName = 'go-' + $manifest.go_version + '-' + $goHash.Substring(0,16).ToLowerInvariant()
-        $toolchain = Join-Path (Join-Path $base 'toolchains') $toolchainName
-        $go = Join-Path $toolchain 'go\bin\go.exe'
-        if (!(Test-Path -LiteralPath $go -PathType Leaf)) {
-            $archive = Join-Path $work 'go.zip'
-            Get-NanolatheDownload "https://go.dev/dl/go$($manifest.go_version).windows-$goArch.zip" $archive $goHash
-            $unpack = Join-Path $work 'toolchain'
-            Expand-NanolatheArchive $archive $unpack
-            if (!(Test-Path -LiteralPath (Join-Path $unpack 'go\bin\go.exe'))) { throw 'Go archive is missing go.exe.' }
-            [IO.Directory]::Move($unpack, $toolchain)
+        $sumsPath = Join-Path $work 'SHA256SUMS'
+        Get-NanolatheDownload (Get-NanolatheAssetUrl $release 'SHA256SUMS') $sumsPath
+        $sums = Read-NanolatheChecksums ([IO.File]::ReadAllText($sumsPath))
+        if (!$sums.ContainsKey($NanolatheSetupAsset)) { throw "SHA256SUMS does not list $NanolatheSetupAsset." }
+        $setup = Join-Path $work $NanolatheSetupAsset
+        Get-NanolatheDownload (Get-NanolatheAssetUrl $release $NanolatheSetupAsset) $setup
+        Write-Host 'Download complete; verifying SHA-256...'
+        Test-NanolatheChecksum $setup $sums[$NanolatheSetupAsset]
+        $launcher = Install-NanolatheLauncher $base $setup
+        Write-Host 'Installing the game. The launcher downloads and verifies it...'
+        $code = Invoke-NanolatheLauncherUpdate $launcher $work
+        if ($code -ne 0) { throw "The launcher could not install the game (exit code $code). See $(Join-Path $base 'logs')" }
+        [void](Write-NanolatheReleaseLoader $base)
+        if (![string]::IsNullOrWhiteSpace($Root)) {
+            if (!(Test-Path -LiteralPath $Root -PathType Container)) { throw "The Total Annihilation folder does not exist: $Root" }
+            # The launcher validates the remembered folder before playing.
+            Write-NanolatheData (Join-Path $base 'root.txt') ([IO.Path]::GetFullPath($Root))
         }
-        $archive = Join-Path $work 'source.zip'
-        # Source hashes in the manifest belong to its legacy pinned commit.
-        # Fetch current main over HTTPS using the immutable commit resolved above.
-        Invoke-WebRequest -UseBasicParsing -Uri "https://codeload.github.com/nanolathe-gg/nanolathe/zip/$revision" -OutFile $archive -TimeoutSec 600
-        $unpack = Join-Path $work 'source'
-        Expand-NanolatheArchive $archive $unpack
-        $source = Join-Path $unpack ('nanolathe-' + $revision)
-        if (!(Test-Path -LiteralPath (Join-Path $source 'go.sum'))) { throw 'Source archive is missing go.sum.' }
-        $sumBefore = (Get-FileHash -LiteralPath (Join-Path $source 'go.sum') -Algorithm SHA256).Hash
-        $environment = @{
-            GOENV = 'off'; GOTOOLCHAIN = 'local'; CGO_ENABLED = '0'; GOOS = 'windows'; GOARCH = $goArch; GO111MODULE = 'on'
-            GOPATH = (Join-Path $base 'cache\gopath'); GOCACHE = (Join-Path $base 'cache\build')
-            GOROOT = (Join-Path $toolchain 'go'); GOFLAGS = ''; GOWORK = 'off'
-            GOMODCACHE = (Join-Path $base 'cache\gopath\pkg\mod')
-            GOPROXY = 'https://proxy.golang.org'; GOSUMDB = 'sum.golang.org'
-            GOPRIVATE = ''; GONOPROXY = ''; GONOSUMDB = ''; GOEXPERIMENT = ''; GOAMD64 = 'v1'; GOARM64 = 'v8.0'
-        }
-        foreach ($key in $environment.Keys) {
-            $savedEnvironment[$key] = [Environment]::GetEnvironmentVariable($key, 'Process')
-            [Environment]::SetEnvironmentVariable($key, $environment[$key], 'Process')
-        }
-        $name = $version + '-' + $revision + '-' + [guid]::NewGuid().ToString('N')
-        $stage = Join-Path $base ('stage-' + [guid]::NewGuid().ToString('N'))
-        [void][IO.Directory]::CreateDirectory($stage)
-        # The common build manifest (docs/DESIGN_MULTIPLAYER.md section 8.7) is stamped
-        # into the resolved source before the build, from the downloaded archive,
-        # so every platform's install of this release names one build. These
-        # build arguments are the Unix installer's: one common manifest needs
-        # one argument list. Each is passed to the stamp as an -arg value,
-        # since Windows PowerShell can drop a bare "--" before a native command.
-        $buildArgs = @('-mod=readonly', '-trimpath', '-buildvcs=false', '-ldflags=-s -w', './cmd/nanolathe')
-        $stampArgs = @($buildArgs | ForEach-Object { '-arg=' + $_ }) + @(
-            '-source', (Join-Path $work 'source.zip'), '-prefix', ('nanolathe-' + $revision + '/'), '-write', $source, '-cgo', '0',
-            '-variant', ('darwin/amd64/v1=' + $manifest.go_darwin_amd64_sha256), '-variant', ('darwin/arm64/v8.0=' + $manifest.go_darwin_arm64_sha256),
-            '-variant', ('linux/amd64/v1=' + $manifest.go_linux_amd64_sha256), '-variant', ('linux/arm64/v8.0=' + $manifest.go_linux_arm64_sha256),
-            '-variant', ('windows/amd64/v1=' + $manifest.go_windows_amd64_sha256), '-variant', ('windows/arm64/v8.0=' + $manifest.go_windows_arm64_sha256))
-        Push-Location -LiteralPath $source
-        try {
-            Write-Host 'Building Nanolathe (the first build can take several minutes)...'
-            $ErrorActionPreference = 'Continue'
-            & $go run -mod=readonly -trimpath -buildvcs=false ./internal/version/stampgen @stampArgs
-            $stampExit = $LASTEXITCODE
-            $ErrorActionPreference = 'Stop'
-            if ($stampExit -ne 0) { throw "Build stamp failed with code $stampExit." }
-            $ErrorActionPreference = 'Continue'
-            & $go build -o (Join-Path $stage 'nanolathe.exe') @buildArgs
-            $buildExit = $LASTEXITCODE
-            $ErrorActionPreference = 'Stop'
-            if ($buildExit -ne 0) { throw "Go build failed with code $buildExit." }
-            $ErrorActionPreference = 'Continue'
-            & $go mod verify
-            $verifyExit = $LASTEXITCODE
-            $ErrorActionPreference = 'Stop'
-            if ($verifyExit -ne 0) { throw 'Go module checksum verification failed.' }
-            if ((Get-FileHash -LiteralPath (Join-Path $source 'go.sum') -Algorithm SHA256).Hash -ne $sumBefore) {
-                throw 'Build changed the pinned go.sum.'
-            }
-        } finally { Pop-Location }
-        [IO.File]::WriteAllText((Join-Path $stage 'launch.ps1'), (Get-NanolatheLauncher), (New-Object Text.UTF8Encoding($false)))
-        [IO.File]::WriteAllText((Join-Path $stage 'release.txt'), $manifestText, (New-Object Text.UTF8Encoding($false)))
-        [IO.File]::WriteAllText((Join-Path $stage 'source-revision'), $revision, (New-Object Text.UTF8Encoding($false)))
-        # The icon is part of the resolved source commit archive.
-        [IO.File]::Copy((Join-Path $source 'tools\installer\windows\Nanolathe.ico'), (Join-Path $stage 'Nanolathe.ico'))
-        $release = Publish-NanolatheRelease $base $stage $name {
-            param($exe)
-            $ErrorActionPreference = 'Continue'
-            & $exe --help
-            $verifyExit = $LASTEXITCODE
-            $ErrorActionPreference = 'Stop'
-            if ($verifyExit -ne 0) { throw "Built game verification failed with code $verifyExit." }
-        } {
-            param($destination)
-            # Finish shortcut creation before promotion. The shortcut's fixed
-            # loader continues to use the previous current.txt until the switch.
-            $temporaryShortcut = Join-Path $work 'Nanolathe.lnk'
-            Write-NanolatheShortcut $temporaryShortcut $base $destination
-            [IO.File]::Copy($temporaryShortcut, (Join-Path ([Environment]::GetFolderPath('Programs')) 'Nanolathe.lnk'), $true)
-        }
-        $stage = $null
-        Write-Host "Installed $version. Launch Nanolathe from the Start Menu."
+        Write-Host 'Installed. Start Nanolathe from the Start Menu.'
         Write-Host "Settings and saves: $base"
     } catch {
         Write-Host "Nanolathe installation failed: $($_.Exception.Message)" -ForegroundColor Red
         Write-Host "Log: $log"
         throw
     } finally {
-        foreach ($key in $savedEnvironment.Keys) { [Environment]::SetEnvironmentVariable($key, $savedEnvironment[$key], 'Process') }
         [Net.ServicePointManager]::SecurityProtocol = $tlsBefore
-        if ($stage -and [IO.Directory]::Exists($stage)) { Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue }
         if ($work -and [IO.Directory]::Exists($work)) { Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue }
         if ($transcribing) { Stop-Transcript -ErrorAction SilentlyContinue | Out-Null }
-        if ($lock) { $lock.Dispose() }
     }
-    if (!$NoRun) {
-        $skipBefore = [Environment]::GetEnvironmentVariable('NANOLATHE_SKIP_UPDATE_CHECK', 'Process')
-        try {
-            [Environment]::SetEnvironmentVariable('NANOLATHE_SKIP_UPDATE_CHECK', '1', 'Process')
-            & ([scriptblock]::Create((Get-NanolatheLauncher))) -Base $base -Root $Root
-        } finally { [Environment]::SetEnvironmentVariable('NANOLATHE_SKIP_UPDATE_CHECK', $skipBefore, 'Process') }
-    }
+    if (!$NoRun) { Start-Process -FilePath $launcher -WorkingDirectory $base }
 }
 
 # Dot-sourcing exposes the pure helpers for offline tests without running setup.
