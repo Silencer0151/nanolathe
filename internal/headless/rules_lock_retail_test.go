@@ -289,6 +289,13 @@ import (
 // both ashap locks, both online Modern AI digests and every Strict and
 // Community lock hold: Strict and Community never hold such a shot. Every
 // Modern value is the same with GOMAXPROCS 1, 2 and 12.
+//
+// Kill speed and hit chance in Modern threat targeting (DESIGN_WEAPONS_PROJECTILES
+// "Modern threat targeting and incoming fire") move the Modern benchmark warm
+// and final locks: automatic acquisition now weights each candidate by the
+// shots it needs and, for unguided weapons, by how far it moves during the
+// shot's flight, so the benchmark's armies pick other targets. Both ashap
+// locks and every Strict and Community lock hold.
 const (
 	lockAshapMap                   = "ashap plateau"
 	lockAshapSeed           uint32 = 7
@@ -312,10 +319,10 @@ const (
 	lockBenchModernInitial           = "partial-v1:55165c066f8b6eaa"
 	lockBenchStrictWarm              = "partial-v1:92288be0462952a2"
 	lockBenchCommunityWarm           = "partial-v1:9ca4bb1bae72a0e7"
-	lockBenchModernWarm              = "partial-v1:b29e92b1f56dda76"
+	lockBenchModernWarm              = "partial-v1:5b1d586153eefa5f"
 	lockBenchStrictFinal             = "partial-v1:4a9bfa48817da57c"
 	lockBenchCommunityFinal          = "partial-v1:a97cef8ec7ca358d"
-	lockBenchModernFinal             = "partial-v1:2489ded57e35f247"
+	lockBenchModernFinal             = "partial-v1:3c81c593a0d3b283"
 )
 
 // The expanded retail audit corrects active-search budget continuation

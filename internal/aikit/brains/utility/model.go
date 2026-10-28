@@ -188,6 +188,7 @@ type shared struct {
 	count     []int32 // own units (built + frames) per definition
 	frameN    []int32 // own immobile frames per definition
 	frameGM   []int64 // their expected metal gain
+	frameGE   []int64 // their energy gain, weighted by build progress (playFramePower)
 	commitN   []int32 // live build commitments per definition
 	commitGM  []int64
 	touched   []int32
@@ -331,6 +332,7 @@ func (s *shared) setup(k *aikit.Kit) {
 	s.count = make([]int32, n)
 	s.frameN = make([]int32, n)
 	s.frameGM = make([]int64, n)
+	s.frameGE = make([]int64, n)
 	s.commitN = make([]int32, n)
 	s.commitGM = make([]int64, n)
 	s.prodBlock = make([]uint32, n)
@@ -726,7 +728,7 @@ func (s *shared) observe(b *core.Board) {
 		s.count[i] = 0
 	}
 	for _, idx := range s.touched {
-		s.frameN[idx], s.frameGM[idx], s.commitN[idx], s.commitGM[idx] = 0, 0, 0, 0
+		s.frameN[idx], s.frameGM[idx], s.frameGE[idx], s.commitN[idx], s.commitGM[idx] = 0, 0, 0, 0, 0
 	}
 	s.touched = s.touched[:0]
 	s.bpFac, s.bpBld, s.upkeepE, s.mexUpkeep, s.firmE, s.windE = 0, 0, 0, 0, 0, 0
@@ -748,6 +750,9 @@ func (s *shared) observe(b *core.Board) {
 			}
 			s.touch(info.Index)
 			s.frameN[info.Index]++
+			if r.Has(aikit.RoleEnergy) {
+				s.frameGE[info.Index] += s.gainE(info) * int64(min(max(u.Progress, 0), 100)) / 100
+			}
 			if r.Has(aikit.RoleExtractor) {
 				if sp := s.spotOf(m, u); sp >= 0 {
 					s.frameGM[info.Index] += spotGain(info, m.Spots[sp].Metal)
@@ -820,7 +825,14 @@ func (s *shared) observe(b *core.Board) {
 		}
 		s.pendM += max64(s.frameGM[idx], s.commitGM[idx])
 		if info.Role.Has(aikit.RoleEnergy) {
-			s.pendE += int64(n) * s.gainE(info)
+			if p.Play&playFramePower != 0 {
+				// A frame pays by what is built of it; a fusion frame is
+				// ten minutes from paying. Builders still walking count in
+				// full, so a planned plant is not started twice.
+				s.pendE += s.frameGE[idx] + int64(n-s.frameN[idx])*s.gainE(info)
+			} else {
+				s.pendE += int64(n) * s.gainE(info)
+			}
 		}
 		if info.Role.Has(aikit.RoleFactory) {
 			s.pendFacBP += int64(n) * int64(info.BuildPower)
