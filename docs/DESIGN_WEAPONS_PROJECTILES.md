@@ -639,6 +639,19 @@ matter; future movement, enemy resources, reload progress and script readiness
 are not forecast. The scoring constants and 256-unit neighborhood are prototype
 tuning, not historical constants.
 
+**A turret defends what lies behind it (issue #168).** For a shooter that
+cannot move, an enemy weapon whose medium and height gates admit the shooter
+threatens it at the same strength whether or not it is in range now: the
+acquisition gate without its range clause. A raider driving past a turret
+line toward the base therefore keeps its threat while it stays inside the
+turret's own range, instead of scoring 1 and losing the turret to whatever
+can shoot the turret itself. A ground turret still ignores weapons that can
+only engage aircraft. Mobile shooters keep ranking by what can engage them
+now, since they can move out of reach. In head-to-head arena games against
+the ranking without this rule (protocol v3 pools, random starts, sides
+swapped) it is strength-neutral: 49.2% over 192 20-minute games, t90
+[47.5, 50.9], and 50.5% over 192 40-minute games, t90 [45.8, 55.2].
+
 A visible active infector then adds 12000
 ([Modern infector target preference](#modern-infector-target-preference)).
 Add 100 for a preferred category. If reliable incoming damage plus this weapon's
@@ -646,8 +659,7 @@ shot exceeds 120% of remaining health, multiply the score by four fifths. That
 is a **soft overage preference**, never a requirement to reach 120%, and never a
 ban on an indivisible finishing shot.
 
-**Kill speed and hit chance (issue #168; proposal awaiting maintainer
-decision).** The score is then weighted by how soon this slot removes the
+**Kill speed and hit chance (issue #168).** The score is then weighted by how soon this slot removes the
 target, so a shooter takes the target whose fire it stops soonest rather than
 the strongest threat however long that takes:
 
@@ -690,6 +702,18 @@ measured strength difference. Kill speed without hit chance was weaker in
 40-minute games (42.7% to 47.9% across variants, worse trades in each), and
 using an enemy's damage rate alone as its threat, without the 1000 base, did
 no better.
+
+Kill speed is also what lets a lone turret finish a target. Without it, the
+overage preference marks down every finishing shot that overshoots by more
+than 20%, and bypasses the retention margin, so a turret left a 10-health
+raider for a fresh one and the raider drove through. In a retail probe of
+waves driving past a line of five LLTs (eight placements each, turrets held
+at full health), the ranking without these rules killed 16 of 64 Raiders and
+Strict 25; with kill speed and hit chance 24, and with the turret threat rule
+as well 27. Against A.K.s, 56 of 64 against Strict's 59, where the gap
+is turrets holding fire across a neighbouring turret
+([§2.3.2](#232-modern-friendly-and-feature-obstruction)) and ordinary
+re-ranking, not a target scored as harmless.
 
 **Direct-fire obstruction preference (issue #97).** Automatic ranking prefers
 a candidate without a demonstrated current direct-flight obstruction over a

@@ -52,6 +52,41 @@ func TestModernKillSpeedRanksEqualThreats(t *testing.T) {
 	}
 }
 
+// A turret defends what lies behind it, so an armed enemy outside its own
+// weapon's reach still threatens: an Instigator driving past a line of
+// turrets toward the commander. A mobile shooter keeps ranking by what can
+// reach it now, and a weapon that could never engage the turret's medium
+// is no threat to either (DESIGN_WEAPONS_PROJECTILES "Modern threat
+// targeting", issue #168).
+func TestModernTurretCountsArmedEnemiesOutOfReach(t *testing.T) {
+	s, w, terrain, shooter, harmless, weapon := modernCombatFixture(t)
+	h, err := w.Create(harmless.Def, 1, cellCentre(8), numeric.FixedFromInt(10), cellCentre(1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	passing := w.Unit(h)
+	short := *weapon
+	short.Range = 32 // the turret is 112 away
+	passing.InstallWeapon(0, &short)
+	q := modernTargetQuery(s, w, terrain, shooter, harmless, passing)
+	if got, _ := s.rules().SelectTarget(s, &q); got != passing.Handle {
+		t.Fatal("a turret preferred a nearer harmless unit to an armed one passing out of reach")
+	}
+	mobile := *shooter.Def
+	mobile.CanMove = true
+	shooter.Def = &mobile
+	if got, _ := s.rules().SelectTarget(s, &q); got != harmless.Handle {
+		t.Fatal("a mobile shooter counted an enemy that cannot reach it")
+	}
+	fixed := mobile
+	fixed.CanMove = false
+	shooter.Def = &fixed
+	short.ToAirWeapon = true
+	if got, _ := s.rules().SelectTarget(s, &q); got != harmless.Handle {
+		t.Fatal("a weapon that cannot engage the turret's medium counted as a threat")
+	}
+}
+
 // An unguided shot loses hits against a target that moves during its flight,
 // so of two equal threats a cannon takes the one standing still; a beam
 // weapon, which keeps every hit, takes the nearer one whatever it is doing.
