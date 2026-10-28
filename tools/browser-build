@@ -41,13 +41,6 @@ with tempfile.TemporaryDirectory(prefix='nanolathe-browser-') as temp:
     wasm_name = f'nanolathe.{digest[:16]}.wasm'
     (out / wasm_name).write_bytes(data)
     (out / (wasm_name + '.gz')).write_bytes(gzip.compress(data, compresslevel=9, mtime=0))
-# The Chinese atlases stay out of the wasm (internal/film/asset_js.go embeds the
-# base pair only). They ship beside it and are fetched when a language needs
-# them, so an English or Ukrainian session never downloads them.
-film_cjk = ['display-cjk.png', 'display-cjk.json', 'body-cjk.png', 'body-cjk.json']
-(out / 'film').mkdir(parents=True, exist_ok=True)
-for name in film_cjk:
-    shutil.copyfile(root / 'internal/film/assets' / name, out / 'film' / name)
 goroot = subprocess.check_output(['go', 'env', 'GOROOT'], cwd=root, text=True).strip()
 runtime = (Path(goroot) / 'lib/wasm/wasm_exec.js').read_bytes()
 runtime_name = 'wasm_exec.' + hashlib.sha256(runtime).hexdigest()[:16] + '.js'
@@ -59,8 +52,10 @@ if manifest:
         shutil.copyfile(source, destination)
     (out / 'demo/manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
 revision = subprocess.check_output(['git', 'describe', '--always', '--dirty'], cwd=root, text=True).strip()
-build = dict(schema=1, version=revision, wasm=wasm_name, wasm_gz=wasm_name + '.gz', runtime=runtime_name, size=len(data), sha256=digest, film_cjk=film_cjk)
-browser_bundle(root / 'web', out, build)
+build = dict(schema=1, version=revision, wasm=wasm_name, wasm_gz=wasm_name + '.gz', runtime=runtime_name, size=len(data), sha256=digest)
+# The Chinese atlases stay out of the wasm. Their digests and files belong to
+# the hashed host bundle, fetched only when a language needs them.
+browser_bundle(root / 'web', out, build, root / 'internal/film/assets')
 print(f'Browser build: {out}')
 print(f'Wasm: {len(data)/1024**2:.1f} MiB raw, {(out/(wasm_name+".gz")).stat().st_size/1024**2:.1f} MiB gzip')
 if manifest:

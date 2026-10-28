@@ -3,6 +3,7 @@ import {BrowserStorage} from './storage.js';
 import {installBrowserGestures} from './gestures.js';
 import {installFrameGate} from './frames.js';
 import {installBrowserClipboard} from './clipboard.js';
+import {installFilmFonts} from './film.js';
 
 const run = new URLSearchParams(location.search).get('run');
 const host = parent.nanolatheBrowserHost;
@@ -13,6 +14,7 @@ if (config) {
   installFrameGate(window);
   const stopGestures = installBrowserGestures(window, event => window.nanolatheBrowserGesture?.(event));
   const stopClipboard = installBrowserClipboard(window, text => window.nanolatheBrowserPaste?.(text));
+  const stopFonts = installFilmFonts(window, text => post('log', text));
   try {
     const storage = new BrowserStorage(config.storage, () => post('storage'));
     const install = new BrowserFS(config.files, storage, text => post('log', text), result => post('persistence', result));
@@ -37,16 +39,6 @@ if (config) {
     window.nanolatheBrowserSample = encoded => post('sample', {...JSON.parse(encoded),
       wasm_mib:instance.exports.mem.buffer.byteLength / 1024**2, cache_mib:install.cacheBytes / 1024**2});
     window.nanolatheBrowserHeapReady = (bytes, error) => post('profile', {bytes, error});
-    // The Chinese atlases are not in the wasm: the engine asks for them when a
-    // language needs them, and this hands back the four files it reads.
-    window.nanolatheFilmLoadCJK = () => {
-      const names = ['display-cjk.json', 'display-cjk.png', 'body-cjk.json', 'body-cjk.png'];
-      Promise.all(names.map(async name => {
-        const response = await fetch(new URL('../film/' + name, import.meta.url), {cache: 'force-cache'});
-        if (!response.ok) throw new Error('film/' + name + ': HTTP ' + response.status);
-        window.nanolatheFilmCJKReady?.(name, new Uint8Array(await response.arrayBuffer()));
-      })).catch(error => post('log', 'Chinese atlases: ' + (error.stack || error.message)));
-    };
     window.addEventListener('message', event => {
       if (event.source === parent && event.origin === location.origin && event.data?.channel === 'nanolathe' &&
           event.data.run === run && event.data.type === 'heap-profile') window.browserHeapProfile?.();
@@ -60,5 +52,6 @@ if (config) {
   } finally {
     stopGestures();
     stopClipboard();
+    stopFonts();
   }
 }
