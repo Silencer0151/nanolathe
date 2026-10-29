@@ -33,19 +33,30 @@ type Client interface {
 // pointers. Delivery is bounded while the window is busy: one entry for the
 // local acknowledgment-paced prototype, 32 for continuous hosted grants.
 type LocalDriver struct {
-	sess      *session.Session
-	client    Client
-	reads     chan localRead
-	done      chan struct{}
-	closeOnce sync.Once
-	position  uint64
-	err       error
-	ended     bool
-	playout   *playoutClock
-	readError chan error
+	sess                 *session.Session
+	client               Client
+	reads                chan localRead
+	done                 chan struct{}
+	closeOnce            sync.Once
+	position             uint64
+	appliedLocalSequence uint64 // host-only receipt watermark, not a stream position
+	err                  error
+	ended                bool
+	playout              *playoutClock
+	readError            chan error
 	// The resource double-click producer has one pending first-click move.
 	moveSequence, movePosition uint64
 	cancel                     *session.SeatCommand
+}
+
+// AppliedLocalSequence is the last local client sequence whose grant has run.
+// It lets host input assistants bound outstanding commands without mistaking a
+// shared stream position for a client's sequence or inspecting live units.
+func (d *LocalDriver) AppliedLocalSequence() uint64 {
+	if d == nil {
+		return 0
+	}
+	return d.appliedLocalSequence
 }
 
 func NewLocalDriver(s *session.Session, c *relay.LocalClient) (*LocalDriver, error) {
@@ -223,6 +234,11 @@ func (d *LocalDriver) step() (bool, error) {
 			return false, d.fail(err)
 		}
 		d.position = g.Position
+		for _, c := range g.Commands {
+			if c.Seat == d.sess.LocalOwner {
+				d.appliedLocalSequence = max(d.appliedLocalSequence, c.Sequence)
+			}
+		}
 		var hash [32]byte
 		if g.Tick%30 == 0 {
 			hash = d.sess.UnitStateChecksum()

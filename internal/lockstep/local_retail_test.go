@@ -103,6 +103,9 @@ func testLocalDriversRelayCommandsRetail(t *testing.T, delay time.Duration) {
 		t.Fatal(err)
 	}
 	pumpUntil(2)
+	if drivers[1].AppliedLocalSequence() != 0 {
+		t.Fatal("a remote stream position advanced the local submission watermark")
+	}
 	u := sessions[1].Units.Unit(commanders[1])
 	seq, err := drivers[1].Submit(session.HumanCommand{Kind: session.HumanOrder, Order: session.HumanOrderCommand{Handles: []pool.Handle{u.Handle}, Code: 2, Queued: true, TrackQueuedMove: true, Position: orders.ResolvePos{X: u.X + 128<<16, Y: u.Y, Z: u.Z}}})
 	if err != nil {
@@ -118,6 +121,12 @@ func testLocalDriversRelayCommandsRetail(t *testing.T, delay time.Duration) {
 		cancelTick = 20
 	}
 	pumpUntil(cancelTick)
+	if drivers[0].AppliedLocalSequence() != 1 {
+		t.Fatal("a later remote grant changed the first seat's local watermark")
+	}
+	if drivers[1].AppliedLocalSequence() != seq+1 {
+		t.Fatalf("local submission watermark = %d, want %d after move and cancel", drivers[1].AppliedLocalSequence(), seq+1)
+	}
 	if drivers[1].cancel != nil || drivers[1].moveSequence != 0 {
 		t.Fatal("unassigned receipt cancellation did not finish")
 	}

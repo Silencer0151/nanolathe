@@ -275,6 +275,7 @@ type battleSession struct {
 	modernDrag            *battleCommandDrag     // modern command capture; DESIGN_INTERFACE_HUD_INPUT §3.11
 	resourceClick         *resourceClick         // modern resource gesture receipt; DESIGN_INTERFACE_HUD_INPUT §3.10
 	economyPanel          economyPanelState      // Enhanced resource explanation and pointer capture
+	smartMakers           smartMakersState       // local input assistance; never serialized
 	// gammaSetting retains the direct battle's write-all value independently
 	// of the command's immediate display factor [07 R-CAM-01 §6].
 	gammaSetting int
@@ -1197,6 +1198,14 @@ func (b *battleSession) viewerStep(delta float64, cl *client.Client) {
 	if b == nil || cl == nil {
 		return
 	}
+	// Modals may consume input without pausing an online battle. Service
+	// assistance on those paths too, but never read while an async batch runs.
+	// The ordinary controller services it before launching its next batch.
+	defer func() {
+		if b.sim == nil || b.sim.pending == nil {
+			b.serviceSmartMakers()
+		}
+	}()
 	b.radialPointerOwned = false
 	b.pumpLocalMultiplayer(cl)
 	b.pumpReplayPlayback(cl)
