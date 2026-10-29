@@ -5,7 +5,9 @@ import (
 	"image/color"
 
 	"github.com/hajimehoshi/ebiten/v2"
+	"github.com/nanolathe-gg/nanolathe/internal/hud"
 	"github.com/nanolathe-gg/nanolathe/internal/platform/screenkit"
+	"github.com/nanolathe-gg/nanolathe/internal/settings"
 )
 
 // Small demonstrations drawn over the live preview for settings a battle
@@ -44,8 +46,20 @@ func (s *nlScreen) drawDemo(screen *ebiten.Image, card nlCard, v int) {
 	}
 }
 
-// demoSidebar draws the resolved products and retained controls at the
-// selected game's logical resolution. Both sidebar choices use this same draft.
+// nlDraftSidebarRows is the height of the surface a battle at the draft's
+// resolution lays the rail out on, and the UI scale it magnifies it by:
+// Classic never magnifies it (DESIGN_INTERFACE_HUD_INPUT "Modern UI scale").
+func nlDraftSidebarRows(d *nlDraft) (rows, k int) {
+	k = 1
+	if d.pres.Renderer != "classic" {
+		k = int(hud.SurfaceChromeScale(d.pres.UIScale, int32(d.resolution.W), int32(d.resolution.H), settings.MaxChromeScale))
+	}
+	return d.resolution.H / k, k
+}
+
+// demoSidebar draws the resolved products and retained controls on the rows
+// the rail has at the selected game's logical resolution and UI scale, as the
+// battle lays it out. Both sidebar choices use this same draft.
 func (s *nlScreen) demoSidebar(screen *ebiten.Image) {
 	u := s.u()
 	stage := s.demoStage()
@@ -58,7 +72,7 @@ func (s *nlScreen) demoSidebar(screen *ebiten.Image) {
 		return
 	}
 	c := preview.sidebarProductCatalog
-	height := s.draft.resolution.H
+	height, k := nlDraftSidebarRows(&s.draft)
 	original := s.draft.pres.ExpandedSidebar == 0
 	limit := s.nlSidebarBuildLimit(&s.draft)
 	starts, layout := nlSidebarPageStarts(c, original, height, limit, s.draft.pres.SidebarOrders != 0)
@@ -131,8 +145,11 @@ func (s *nlScreen) demoSidebar(screen *ebiten.Image) {
 		s.fonts.Body.Draw(screen, fmt.Sprintf("Current count: %d per page", limit), infoX, infoY, screenkit.Style{Size: 12 * u, Top: nlAmber})
 		infoY += 28 * u
 	}
-	resolution := s.ui.text(nlTextKey{kind: "sidebar resolution", i: s.draft.resolution.W, j: height}, func() string {
-		return fmt.Sprintf("Game resolution: %d x %d", s.draft.resolution.W, height)
+	resolution := s.ui.text(nlTextKey{kind: "sidebar resolution", a: fmt.Sprint(k), i: s.draft.resolution.W, j: s.draft.resolution.H}, func() string {
+		if k > 1 {
+			return fmt.Sprintf("Game resolution: %d x %d, UI scale %dx", s.draft.resolution.W, s.draft.resolution.H, k)
+		}
+		return fmt.Sprintf("Game resolution: %d x %d", s.draft.resolution.W, s.draft.resolution.H)
 	})
 	s.fonts.Body.Draw(screen, resolution, panel.X, panel.Y+panel.H+28*u, screenkit.Style{Size: 11 * u, Top: nlDim})
 }
