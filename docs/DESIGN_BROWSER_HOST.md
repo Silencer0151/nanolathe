@@ -31,6 +31,7 @@ unavailable there. Hidden-page play and the clipboard are host policy
 - `web/host.js`: one runtime per origin, module compilation and iframe lifecycle.
 - `web/game.js`: immutable launch configuration, matching Go runtime, filesystem
   binding, command-line host options and tagged diagnostic messages.
+- `web/film.js`: lazy, verified loading of the optional Chinese font atlases.
 - `web/gestures.js`, `internal/platform/ebitenapp/scroll_js.go`: browser camera
   gestures, event ownership and the presentation-input bridge.
 - `web/clipboard.js`, `internal/platform/ebitenapp/clipboard_js.go`: paste
@@ -116,6 +117,16 @@ original demo distribution agreement would settle it.
    `build.json`; both come from the same build toolchain. The root index selects
    a content-hashed host directory containing its scripts, child page and build
    manifest. Restart uses that same directory, even after the root index changes.
+   The optional Chinese font files live inside that hashed host directory too;
+   their sizes and SHA-256 digests in its pinned `build.json` participate in
+   the host hash. The root manifest lists their nested paths for deployment
+   retention. Selecting Chinese starts the only font request: simultaneous
+   requests share one attempt, and a successful attempt is kept for this runtime.
+   All four files must pass size and digest checks before any bytes reach Go.
+   A failed fetch, read or check reports failure to the language owner and the
+   launcher; no partial font set is delivered. An attempt times out after 15 s.
+   A later Apply can retry, bypassing cached responses after a failed attempt.
+   Engine exit aborts pending acquisition and clears its timer.
    Deploy the new artifact before replacing the root index, and retain prior
    hashed directories/Wasm/runtime files for already-open launchers.
 8. **Browser camera gestures (user-authorized 2026-10-04).** The child runtime
@@ -251,7 +262,10 @@ and integrity, corrupt-cache recovery, failed acquisition, source/run message
 isolation, lock admission/restart cancellation, Blob range reads, read-only
 content, atomic persistence and retry behavior, gesture channel separation,
 touch geometry and pinch lifetime/cancellation, paste-key handling and paste
-delivery, and the frame gate's running and held states. Go tests lock the
+delivery, and the frame gate's running and held states. Optional-font checks
+lock lazy shared requests, complete verified delivery,
+retry after failure or timeout, exit cancellation and the retained host's
+atlas version. Go tests lock the
 background step's hand-off (it runs only between frames, holding them), its
 battle pump and dropped events, its lobby following, and paste into the room
 code field. Authored fixtures contain no

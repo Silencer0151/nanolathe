@@ -3,6 +3,7 @@ import {BrowserStorage} from './storage.js';
 import {installBrowserGestures} from './gestures.js';
 import {installFrameGate} from './frames.js';
 import {installBrowserClipboard} from './clipboard.js';
+import {installFilmFonts} from './film.js';
 
 const run = new URLSearchParams(location.search).get('run');
 const host = parent.nanolatheBrowserHost;
@@ -13,6 +14,7 @@ if (config) {
   installFrameGate(window);
   const stopGestures = installBrowserGestures(window, event => window.nanolatheBrowserGesture?.(event));
   const stopClipboard = installBrowserClipboard(window, text => window.nanolatheBrowserPaste?.(text));
+  const stopFonts = installFilmFonts(window, text => post('log', text));
   try {
     const storage = new BrowserStorage(config.storage, () => post('storage'));
     const install = new BrowserFS(config.files, storage, text => post('log', text), result => post('persistence', result));
@@ -50,5 +52,6 @@ if (config) {
   } finally {
     stopGestures();
     stopClipboard();
+    stopFonts();
   }
 }

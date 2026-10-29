@@ -1,0 +1,114 @@
+#!/usr/bin/env python3
+"""Write the CJK glyph atlases the Chinese interface draws (docs/DESIGN_I18N.md).
+
+Barlow has no Chinese, so the characters the Chinese catalog draws come from
+Noto Sans SC. They go into their own `display-cjk` / `body-cjk` pair rather
+than into the shared film atlases: every player, in every language, loads the
+shared pair, while these are read only when a language needs them.
+
+Hanzi are rasterized below the atlas resolution the Latin faces use and carry
+a `scale` factor (face units per atlas pixel), so the pair stays a couple of
+megabytes while a character still sets at its proper size beside the Latin
+caps. The shared atlases are never written: this script only produces the pair,
+so a rerun from the same font and the same catalog produces the same files.
+
+Usage:
+  tools/film-font-cjk /path/to/NotoSansSC.ttf internal/i18n/locales/chinese.json [...]
+Source revision, checksums and license: internal/film/assets/README.md.
+"""
+import hashlib
+import os
+import json
+from pathlib import Path
+import sys
+import unicodedata
+
+from PIL import Image, ImageDraw, ImageFont
+
+OUT = Path(__file__).resolve().parent.parent / "internal/film/assets"
+WIDTH = 2048
+# A hanzi reads as one piece beside a Latin cap when its ink is a little
+# taller than the cap height.
+HANZI_OVER_CAP = 1.2
+# Rasterized ink height in atlas pixels. The scale factor makes the size
+# independent of this; it only trades atlas memory against sharpness.
+INK_PX = 110
+WEIGHT = {"display": int(os.environ.get("FILM_CJK_WEIGHT_DISPLAY", "800")),
+          "body": int(os.environ.get("FILM_CJK_WEIGHT_BODY", "400"))}
+# Characters the screen sets outside a catalog: the language card's own name
+# and its caption.
+EXTRA = "简体中文界面"
+
+
+def wanted(catalogs):
+    chars = set(EXTRA)
+    for path in catalogs:
+        for text in json.loads(Path(path).read_text(encoding="utf-8")).values():
+            chars.update(text)
+    # Only full-width characters: a narrow one such as the middle dot is
+    # Latin punctuation the screen already sets (as a hyphen), and a
+    # full-width Noto copy would change English and Ukrainian text.
+    return sorted(c for c in chars
+                  if ord(c) > 0x7F and unicodedata.east_asian_width(c) in "WF")
+
+
+def load_face(source, weight, size):
+    font = ImageFont.truetype(source, size)
+    # The weights are axis values of the variable font the README names. A
+    # static font raises here rather than silently setting its own weight.
+    font.set_variation_by_axes([weight])
+    return font
+
+
+def build(source, name, chars):
+    # The base face supplies the cap height the additions are scaled against;
+    # its glyphs and pixels are read, never written.
+    cap = json.loads((OUT / (name + ".json")).read_text())["cap"]
+
+    probe = load_face(source, WEIGHT[name], 256)
+    box = probe.getbbox("国", anchor="ls")
+    em = max(16, round(256 * INK_PX / (box[3] - box[1])))
+    font = load_face(source, WEIGHT[name], em)
+    box = font.getbbox("国", anchor="ls")
+    scale = HANZI_OVER_CAP * cap / (box[3] - box[1])
+
+    rows, glyphs = [], {}
+    x = row_height = 0
+    y = 4
+    for char in chars:
+        left, top, right, bottom = font.getbbox(char, anchor="ls")
+        width, height = right - left, bottom - top
+        if width == 0 or height == 0:
+            continue
+        if x + width + 4 > WIDTH:
+            x, y, row_height = 0, y + row_height + 4, 0
+        rows.append((char, x - left, y - top))
+        glyphs[char] = dict(x=x, y=y, w=width, h=height,
+                            left=round(left * scale), top=round(top * scale),
+                            advance=font.getlength(char) * scale,
+                            scale=scale)
+        x += width + 4
+        row_height = max(row_height, height)
+    if not rows:
+        print(name + "-cjk: nothing to write")
+        return
+
+    atlas = Image.new("L", (WIDTH, y + row_height + 4))
+    draw = ImageDraw.Draw(atlas)
+    for char, px, py in rows:
+        draw.text((px, py), char, font=font, fill=255, anchor="ls")
+    atlas.save(OUT / (name + "-cjk.png"), optimize=True)
+    # Written with an explicit newline so the file is byte-identical whichever
+    # platform regenerates it.
+    with open(OUT / (name + "-cjk.json"), "w", encoding="utf-8", newline="\n") as meta:
+        meta.write(json.dumps({"cap": cap, "glyphs": glyphs},
+                               separators=(",", ":"), ensure_ascii=False) + "\n")
+    print(name + "-cjk", "source sha256:", hashlib.sha256(Path(source).read_bytes()).hexdigest(),
+          "em", em, "scale", round(scale, 3), "glyphs", len(glyphs), "atlas", atlas.size)
+
+
+if len(sys.argv) < 3:
+    sys.exit(__doc__)
+chars = wanted(sys.argv[2:])
+build(sys.argv[1], "display", chars)
+build(sys.argv[1], "body", chars)

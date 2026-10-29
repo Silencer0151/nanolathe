@@ -9,6 +9,7 @@ import (
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/nanolathe-gg/nanolathe/internal/content"
 	"github.com/nanolathe-gg/nanolathe/internal/gui"
+	"github.com/nanolathe-gg/nanolathe/internal/i18n"
 	"github.com/nanolathe-gg/nanolathe/internal/platform/screenkit"
 )
 
@@ -97,7 +98,7 @@ func (s *toolsScreen) drawHeader(dst *ebiten.Image) {
 	}
 	ts := screenkit.Style{Size: 20, Tracking: 0.1, Top: nlCream}
 	s.label(dst, title, screenkit.Rect{X: 306, Y: 27, W: 480, H: 29}, ts, true)
-	s.label(dst, s.contentName, screenkit.Rect{X: 306, Y: 58, W: 590, H: 20}, screenkit.Style{Size: 12, Top: nlDim}, false)
+	s.label(dst, s.contentName, screenkit.Rect{X: 306, Y: 58, W: 590, H: 20}, screenkit.Style{Size: 12, Top: nlDim, Verbatim: true}, false)
 	screenkit.Fill(dst, s.deviceRect(screenkit.Rect{X: 306, Y: 52, W: math.Round(unitViewerMeasure(title, ts, true)) - 4, H: 2}), nlGreenText)
 	screenkit.Fill(dst, s.deviceRect(screenkit.Rect{X: 32, Y: 84, W: 1136, H: 1}), color.RGBA{123, 119, 86, 100})
 }
@@ -109,8 +110,8 @@ func (s *toolsScreen) drawViewer(dst *ebiten.Image) {
 	s.label(dst, "Unit data", screenkit.Rect{X: 862, Y: 108, W: 210, H: 24}, kicker, true)
 	screenkit.Fill(dst, s.deviceRect(screenkit.Rect{X: 862, Y: 175, W: 306, H: 1}), color.RGBA{123, 119, 86, 100})
 	if s.selected != nil {
-		s.label(dst, unitViewerName(s.selected), screenkit.Rect{X: 306, Y: 105, W: 528, H: 51}, screenkit.Style{Size: 40, Top: nlGoldTop, Bottom: nlGoldBottom, Shadow: 0.06, Upper: true}, true)
-		s.label(dst, strings.ToUpper(s.selected.UnitName), screenkit.Rect{X: 308, Y: 157, W: 524, H: 19}, screenkit.Style{Size: 11, Tracking: 0.08, Top: nlGreenText}, true)
+		s.label(dst, unitViewerName(s.selected), screenkit.Rect{X: 306, Y: 105, W: 528, H: 51}, screenkit.Style{Size: 40, Top: nlGoldTop, Bottom: nlGoldBottom, Shadow: 0.06, Upper: true, Verbatim: true}, true)
+		s.label(dst, strings.ToUpper(s.selected.UnitName), screenkit.Rect{X: 308, Y: 157, W: 524, H: 19}, screenkit.Style{Size: 11, Tracking: 0.08, Top: nlGreenText, Verbatim: true}, true)
 	}
 	stage := s.deviceRect(s.viewRect)
 	screenkit.Fill(dst, stage, color.RGBA{10, 14, 12, 255})
@@ -187,13 +188,13 @@ func (s *toolsScreen) drawViewer(dst *ebiten.Image) {
 		// A carriage return starts a new line; each line wraps on its own.
 		var lines []string
 		for _, part := range strings.Split(message, "\r") {
-			lines = append(lines, retailWrapLines(part, unitViewerTextWidth, 468)...)
+			lines = append(lines, unitViewerWrapLines(i18n.T(part), screenkit.Style{Size: unitViewerBodySize}, false, 468)...)
 		}
 		for i, line := range lines {
 			if i >= 10 {
 				break
 			}
-			s.label(dst, line, screenkit.Rect{X: 336, Y: 300 + float64(i)*26, W: 468, H: 25}, screenkit.Style{Size: unitViewerBodySize, Top: nlBody, Align: 1}, false)
+			s.label(dst, line, screenkit.Rect{X: 336, Y: 300 + float64(i)*26, W: 468, H: 25}, screenkit.Style{Size: unitViewerBodySize, Top: nlBody, Align: 1, Verbatim: true}, false)
 		}
 	}
 	s.drawRestrictBlock(dst)
@@ -281,10 +282,11 @@ func (s *toolsScreen) drawSearch(dst *ebiten.Image, index int, r screenkit.Rect)
 	if focused && s.selectAll && text != "" {
 		screenkit.Fill(dst, s.deviceRect(screenkit.Rect{X: tr.X, Y: tr.Y - 2, W: math.Min(tr.W, float64(unitViewerTextWidth(text))), H: unitViewerTextMetric + 2}), color.RGBA{64, 109, 57, 130})
 	}
-	s.label(dst, text, tr, screenkit.Style{Size: unitViewerBodySize, Top: nlBody}, false)
+	// The query is the player's own typing: set it as typed (DESIGN_I18N).
+	s.label(dst, text, tr, screenkit.Style{Size: unitViewerBodySize, Top: nlBody, Verbatim: true}, false)
 	if focused && int(s.uiClock*2)%2 == 0 {
 		caret := min(len(text), max(0, s.panel.EditorCaret()))
-		x := tr.X + unitViewerMeasure(text[:caret], screenkit.Style{Size: unitViewerBodySize}, false)
+		x := tr.X + unitViewerMeasure(text[:caret], screenkit.Style{Size: unitViewerBodySize, Verbatim: true}, false)
 		screenkit.Fill(dst, s.deviceRect(screenkit.Rect{X: min(x, tr.X+tr.W-1), Y: tr.Y - 1, W: 1.2, H: unitViewerBodySize + 4}), nlGreenText)
 	}
 }
@@ -321,15 +323,14 @@ func (s *toolsScreen) drawLibrary(dst *ebiten.Image, index int, g gui.Gadget, r 
 		s.drawPictureAlpha(target, def, screenkit.Rect{X: row.X + 8, Y: y + 2, W: 48, H: 48}, picAlpha)
 		// Long names shrink a little, then take two lines above the ID.
 		text := screenkit.Rect{X: row.X + 64, Y: y + 8, W: row.W - 70, H: 21}
-		st := screenkit.Style{Size: 15, Top: c, Upper: true}
+		st := screenkit.Style{Size: 15, Top: c, Upper: true, Verbatim: true}
 		for st.Size > 13 && unitViewerMeasure(name, st, true) > text.W {
 			st.Size -= 0.5
 		}
 		idY := y + 30
 		lines := []string{name}
 		if unitViewerMeasure(name, st, true) > text.W {
-			measure := func(s string) int { return int(math.Ceil(unitViewerMeasure(s, st, true))) }
-			if wrapped := retailWrapLines(name, measure, int(text.W)); len(wrapped) > 1 {
+			if wrapped := unitViewerWrapLines(name, st, true, text.W); len(wrapped) > 1 {
 				lines, text.Y, idY = []string{wrapped[0], strings.Join(wrapped[1:], " ")}, y+3, y+37
 			}
 		}
@@ -341,7 +342,7 @@ func (s *toolsScreen) drawLibrary(dst *ebiten.Image, index int, g gui.Gadget, r 
 			idW -= used + 6
 		}
 		// An ID beside a state shrinks a little before it would clip.
-		ids := screenkit.Style{Size: 10, Top: nlDim}
+		ids := screenkit.Style{Size: 10, Top: nlDim, Verbatim: true}
 		for ids.Size > 8.5 && unitViewerMeasure(id, ids, false) > idW {
 			ids.Size -= 0.5
 		}
@@ -410,7 +411,7 @@ func (s *toolsScreen) drawInfo(dst *ebiten.Image, index int, g gui.Gadget, r scr
 	if start > 0 && start < len(s.infoRows) && s.infoRows[start].Kind == unitViewerRowLinkTail {
 		start-- // keep a link's picture when only its second row is in view
 	}
-	body := screenkit.Style{Size: unitViewerBodySize, Top: nlBody}
+	body := screenkit.Style{Verbatim: true, Size: unitViewerBodySize, Top: nlBody}
 	for i := start; i < len(s.infoRows) && i-top < unitViewerListRows(g); i++ {
 		y := r.Y + 2 + float64(i-top)*h
 		row := s.infoRows[i]
@@ -421,25 +422,25 @@ func (s *toolsScreen) drawInfo(dst *ebiten.Image, index int, g gui.Gadget, r scr
 		line := screenkit.Rect{X: x0, Y: y, W: w, H: unitViewerTextMetric + 2}
 		switch row.Kind {
 		case unitViewerRowHeading:
-			s.label(target, row.Label, screenkit.Rect{X: x0, Y: y + 1, W: w, H: 18}, screenkit.Style{Size: 14, Tracking: 0.1, Top: nlGoldTop, Bottom: nlGoldBottom, Upper: true}, true)
-			s.label(target, row.Value, screenkit.Rect{X: x0, Y: y + 4, W: w, H: 14}, screenkit.Style{Size: 10, Tracking: 0.08, Top: nlDim, Upper: true, Align: 2}, false)
+			s.label(target, row.Label, screenkit.Rect{X: x0, Y: y + 1, W: w, H: 18}, screenkit.Style{Verbatim: true, Size: 14, Tracking: 0.1, Top: nlGoldTop, Bottom: nlGoldBottom, Upper: true}, true)
+			s.label(target, row.Value, screenkit.Rect{X: x0, Y: y + 4, W: w, H: 14}, screenkit.Style{Verbatim: true, Size: 10, Tracking: 0.08, Top: nlDim, Upper: true, Align: 2}, false)
 			screenkit.Fill(target, s.deviceRect(screenkit.Rect{X: x0, Y: y + h - 1, W: w, H: 1}), color.RGBA{123, 119, 86, 110})
 		case unitViewerRowText:
 			s.label(target, row.Label, line, body, false)
 		case unitViewerRowNote:
-			s.label(target, row.Label, screenkit.Rect{X: x0, Y: y + 1, W: w, H: 16}, screenkit.Style{Size: unitViewerNoteSize, Top: nlDim}, false)
+			s.label(target, row.Label, screenkit.Rect{X: x0, Y: y + 1, W: w, H: 16}, screenkit.Style{Verbatim: true, Size: unitViewerNoteSize, Top: nlDim}, false)
 		case unitViewerRowPair:
-			s.label(target, row.Label, line, screenkit.Style{Size: unitViewerBodySize, Top: nlDim}, false)
+			s.label(target, row.Label, line, screenkit.Style{Verbatim: true, Size: unitViewerBodySize, Top: nlDim}, false)
 			right := valueRight
 			if row.Wide {
 				right = x0 + w
 			}
-			s.label(target, row.Value, screenkit.Rect{X: x0, Y: y, W: right - x0, H: line.H}, screenkit.Style{Size: unitViewerBodySize, Top: nlBody, Align: 2}, false)
-			s.label(target, row.Unit, screenkit.Rect{X: valueRight + 5, Y: y + 3, W: unitViewerUnitWidth - 5, H: 15}, screenkit.Style{Size: unitViewerUnitSize, Top: nlDim}, false)
+			s.label(target, row.Value, screenkit.Rect{X: x0, Y: y, W: right - x0, H: line.H}, screenkit.Style{Verbatim: true, Size: unitViewerBodySize, Top: nlBody, Align: 2}, false)
+			s.label(target, row.Unit, screenkit.Rect{X: valueRight + 5, Y: y + 3, W: unitViewerUnitWidth - 5, H: 15}, screenkit.Style{Verbatim: true, Size: unitViewerUnitSize, Top: nlDim}, false)
 		case unitViewerRowCard:
-			s.label(target, row.Value, screenkit.Rect{X: x0, Y: y + 4, W: w, H: 14}, screenkit.Style{Size: 10, Tracking: 0.08, Top: nlKicker, Upper: true, Align: 2}, false)
-			slot := unitViewerMeasure(row.Value, screenkit.Style{Size: 10, Tracking: 0.08, Upper: true}, false)
-			st := screenkit.Style{Size: 15, Top: nlCream}
+			s.label(target, row.Value, screenkit.Rect{X: x0, Y: y + 4, W: w, H: 14}, screenkit.Style{Verbatim: true, Size: 10, Tracking: 0.08, Top: nlKicker, Upper: true, Align: 2}, false)
+			slot := unitViewerMeasure(row.Value, screenkit.Style{Verbatim: true, Size: 10, Tracking: 0.08, Upper: true}, false)
+			st := screenkit.Style{Verbatim: true, Size: 15, Top: nlCream}
 			for st.Size > 12 && unitViewerMeasure(row.Label, st, true) > w-slot-8 {
 				st.Size -= 0.5
 			}
@@ -451,7 +452,7 @@ func (s *toolsScreen) drawInfo(dst *ebiten.Image, index int, g gui.Gadget, r scr
 				chip := screenkit.Rect{X: x, Y: y + 3, W: cw, H: h - 6}
 				screenkit.Fill(target, s.deviceRect(chip), color.RGBA{24, 36, 26, 220})
 				screenkit.Outline(target, s.deviceRect(chip), max(1, s.scale*0.75), color.RGBA{86, 102, 74, 255})
-				s.label(target, tag, screenkit.Rect{X: x, Y: y + 4, W: cw, H: 14}, screenkit.Style{Size: unitViewerTagSize, Tracking: 0.04, Top: nlBody, Upper: true, Align: 1}, false)
+				s.label(target, tag, screenkit.Rect{X: x, Y: y + 4, W: cw, H: 14}, screenkit.Style{Verbatim: true, Size: unitViewerTagSize, Tracking: 0.04, Top: nlBody, Upper: true, Align: 1}, false)
 				x += cw + unitViewerTagGap
 			}
 		case unitViewerRowLink:
@@ -475,19 +476,19 @@ func (s *toolsScreen) drawInfoLink(dst *ebiten.Image, row unitViewerRow, entry s
 	}
 	s.drawPicture(dst, row.Link, screenkit.Rect{X: x0, Y: entry.Y + 2, W: 34, H: 34})
 	tx := x0 + 44
-	s.label(dst, unitViewerName(row.Link), screenkit.Rect{X: tx, Y: entry.Y + 1, W: x0 + w - tx, H: 18}, screenkit.Style{Size: unitViewerBodySize, Top: nlCream}, false)
-	detail := screenkit.Style{Size: 13, Top: nlGreenText, Align: 2}
+	s.label(dst, unitViewerName(row.Link), screenkit.Rect{X: tx, Y: entry.Y + 1, W: x0 + w - tx, H: 18}, screenkit.Style{Verbatim: true, Size: unitViewerBodySize, Top: nlCream}, false)
+	detail := screenkit.Style{Verbatim: true, Size: 13, Top: nlGreenText, Align: 2}
 	right := x0 + w - unitViewerMeasure(row.Value, detail, false) - 8
 	s.label(dst, row.Value, screenkit.Rect{X: tx, Y: entry.Y + 18, W: x0 + w - tx, H: 17}, detail, false)
 	if row.Modern {
-		const tag = "Modern"
+		tag := i18n.T("Modern")
 		cw := unitViewerTagWidth(tag)
 		chip := screenkit.Rect{X: right - cw, Y: entry.Y + 21, W: cw, H: 15}
 		screenkit.Outline(dst, s.deviceRect(chip), max(1, s.scale*0.75), alphaC(nlKicker, 0.8))
-		s.label(dst, tag, screenkit.Rect{X: chip.X, Y: chip.Y + 1, W: cw, H: 13}, screenkit.Style{Size: unitViewerTagSize, Tracking: 0.04, Top: nlKicker, Upper: true, Align: 1}, false)
+		s.label(dst, tag, screenkit.Rect{X: chip.X, Y: chip.Y + 1, W: cw, H: 13}, screenkit.Style{Verbatim: true, Size: unitViewerTagSize, Tracking: 0.04, Top: nlKicker, Upper: true, Align: 1}, false)
 		right = chip.X - 6
 	}
-	s.label(dst, strings.ToUpper(row.Link.UnitName), screenkit.Rect{X: tx, Y: entry.Y + 21, W: right - tx, H: 14}, screenkit.Style{Size: 10, Tracking: 0.04, Top: nlDim}, false)
+	s.label(dst, strings.ToUpper(row.Link.UnitName), screenkit.Rect{X: tx, Y: entry.Y + 21, W: right - tx, H: 14}, screenkit.Style{Verbatim: true, Size: 10, Tracking: 0.04, Top: nlDim}, false)
 }
 
 func (s *toolsScreen) drawScrollbar(dst *ebiten.Image, index int, r screenkit.Rect) {

@@ -14,6 +14,7 @@ import (
 	"github.com/nanolathe-gg/nanolathe/internal/camera"
 	"github.com/nanolathe-gg/nanolathe/internal/client"
 	"github.com/nanolathe-gg/nanolathe/internal/content"
+	"github.com/nanolathe-gg/nanolathe/internal/film"
 	"github.com/nanolathe-gg/nanolathe/internal/gameplay"
 	"github.com/nanolathe-gg/nanolathe/internal/i18n"
 	"github.com/nanolathe-gg/nanolathe/internal/input"
@@ -198,6 +199,9 @@ func (s *nlScreen) warm(g *gameShell) {
 	if s == nil || s.open || s.reload != nil || g == nil || g.cs == nil {
 		return
 	}
+	if s.ready {
+		s.fonts = s.fonts.Refresh()
+	}
 	if s.warmed == g {
 		s.tendMenuPictures(g)
 		return
@@ -275,6 +279,7 @@ func (s *nlScreen) bindShell(g *gameShell) {
 	s.draft = s.freshDraft(g)
 	s.revealContent(s.draft.mod)
 	s.touched = map[string]bool{}
+	s.retainLanguageChoice(g)
 	s.pendingPresets = nil
 	s.installsSeen = modDownload.view().installs
 	s.bindSource(g)
@@ -541,7 +546,14 @@ func (s *nlScreen) apply() {
 	}
 	s.applyDraft(g, s.draft, s.touched, s.pendingPresets)
 	s.draft = s.freshDraft(g)
+	s.retainLanguageChoice(g)
 	s.toast, s.toastLeft = "Settings saved", 2.2
+	if g.requestedLanguage() == "chinese" && i18n.Language() != "chinese" {
+		s.toast, s.toastLeft = "Loading Chinese fonts...", 6
+		if film.CJKError() != nil {
+			s.toast = "Chinese fonts could not load. Apply to retry."
+		}
+	}
 	g.playMenuCue("BigButton")
 }
 
@@ -620,7 +632,13 @@ func (s *nlScreen) applyDraft(g *gameShell, draft nlDraft, touched map[string]bo
 		g.fullscreen = next.fullscreen
 		ebiten.SetFullscreen(next.fullscreen)
 	}
-	g.chooseLanguage(next.language)
+	if touched["language"] {
+		g.chooseLanguage(next.language)
+	} else if g.requestedLanguage() == "chinese" && i18n.Language() != "chinese" {
+		// Retrying an existing request is not a language edit: in particular,
+		// a --language override must keep its one-run scope (DESIGN_I18N).
+		g.applyLanguage()
+	}
 	g.display.Width, g.display.Height = next.resolution.W, next.resolution.H
 	g.commitWindowSize()
 	g.saveSettings()
@@ -911,6 +929,7 @@ func (s *nlScreen) Draw(screen *ebiten.Image) {
 		s.art = loadNLArt(s.baseFS)
 		s.ready = true
 	}
+	s.fonts = s.fonts.Refresh()
 	b := screen.Bounds()
 	nlScreenW, nlScreenH = float64(b.Dx()), float64(b.Dy())
 	u := s.u()
@@ -2951,6 +2970,7 @@ func (s *nlScreen) updateReload() {
 			if len(r.touched) > 0 || len(r.presets) > 0 || r.draft.controls != 0 {
 				s.applyDraft(g, r.draft, r.touched, r.presets)
 				s.draft = s.freshDraft(g)
+				s.retainLanguageChoice(g)
 			}
 			s.toast, s.toastLeft = "Now playing "+r.name, 2.5
 			return

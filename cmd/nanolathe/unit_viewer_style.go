@@ -4,10 +4,12 @@ import (
 	"image"
 	"math"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/nanolathe-gg/nanolathe/internal/film"
 	"github.com/nanolathe-gg/nanolathe/internal/gui"
+	"github.com/nanolathe-gg/nanolathe/internal/i18n"
 	"github.com/nanolathe-gg/nanolathe/internal/platform/screenkit"
 	"github.com/nanolathe-gg/nanolathe/vfs"
 
@@ -110,6 +112,9 @@ func unitViewerMeasure(text string, style screenkit.Style, display bool) float64
 	if display {
 		font = "display"
 	}
+	if !style.Verbatim {
+		text = i18n.T(text)
+	}
 	text = unitViewerFontText(text)
 	if style.Upper {
 		text = strings.ToUpper(text)
@@ -118,7 +123,53 @@ func unitViewerMeasure(text string, style screenkit.Style, display bool) float64
 }
 
 func unitViewerTextWidth(text string) int {
-	return int(math.Ceil(unitViewerMeasure(text, screenkit.Style{Size: unitViewerBodySize}, false)))
+	return int(math.Ceil(unitViewerMeasure(text, screenkit.Style{Size: unitViewerBodySize, Verbatim: true}, false)))
+}
+
+// Like the native wrapper, prefer spaces and split an overlong word when it
+// has none. Walk rune boundaries so Chinese and authored Unicode keep every
+// character. Text has its final spelling before layout (DESIGN_I18N).
+func unitViewerWrapLines(text string, style screenkit.Style, display bool, width float64) []string {
+	style.Verbatim = true
+	measure := func(s string) float64 {
+		return unitViewerMeasure(s, style, display)
+	}
+	if text == "" || width <= 0 {
+		return []string{text}
+	}
+	var lines []string
+	for text != "" {
+		if measure(text) <= width {
+			lines = append(lines, text)
+			break
+		}
+		cut := -1
+		for i, r := range text {
+			if r == ' ' {
+				if measure(text[:i]) > width {
+					break
+				}
+				cut = i
+			}
+		}
+		if cut <= 0 {
+			cut = 0
+			for i := range text {
+				_, size := utf8.DecodeRuneInString(text[i:])
+				end := i + size
+				if cut > 0 && measure(text[:end]) > width {
+					break
+				}
+				cut = end
+			}
+			lines = append(lines, text[:cut])
+			text = text[cut:]
+			continue
+		}
+		lines = append(lines, text[:cut])
+		text = strings.TrimLeft(text[cut:], " ")
+	}
+	return lines
 }
 
 func unitViewerFontText(text string) string {
@@ -128,6 +179,10 @@ func unitViewerFontText(text string) string {
 }
 
 func unitViewerFitText(text string, width float64, style screenkit.Style, display bool) string {
+	if !style.Verbatim {
+		text = i18n.T(text)
+		style.Verbatim = true
+	}
 	if unitViewerMeasure(text, style, display) <= width {
 		return text
 	}
@@ -143,6 +198,8 @@ func (s *toolsScreen) label(dst *ebiten.Image, text string, r screenkit.Rect, st
 	if target == nil || text == "" {
 		return
 	}
+	// Fit translates the whole UI label before measuring it. Authored text,
+	// player input and already-translated info rows explicitly ask for Verbatim.
 	text = unitViewerFitText(text, r.W, style, display)
 	font := s.fonts.Body
 	if display {
@@ -157,8 +214,8 @@ func (s *toolsScreen) label(dst *ebiten.Image, text string, r screenkit.Rect, st
 	}
 	y := r.Y + style.Size
 	style.Size *= s.scale
-	// The viewer measures on the CPU without translation (unitViewerMeasure),
-	// so it draws what it measured.
+	// The label was translated and fitted above, so it draws what
+	// unitViewerMeasure measured.
 	style.Verbatim = true
 	font.Draw(target, unitViewerFontText(text), s.canvas.X+x*s.scale, s.canvas.Y+y*s.scale, style)
 }
@@ -167,8 +224,9 @@ func (s *toolsScreen) label(dst *ebiten.Image, text string, r screenkit.Rect, st
 // mount after decoding: the detached images and GAF records retain no archive
 // reader, so closing the viewer has no content-lifetime work to postpone.
 func (s *toolsScreen) preparePaint() {
-	if s.fonts.Display == nil {
-		s.fonts = screenkit.LoadFonts()
+	s.fonts = s.fonts.Refresh()
+	if s.infoLanguage != i18n.Language() {
+		s.refreshInfo()
 	}
 	if s.art != nil {
 		return

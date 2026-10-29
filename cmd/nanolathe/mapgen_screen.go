@@ -511,10 +511,11 @@ func (s *mapgenScreen) picture(g *gameShell, m *mapgen.Map) *ebiten.Image {
 func (s *mapgenScreen) readyArt(g *gameShell) bool {
 	k := s.kit
 	if k.ready {
+		k.fonts = k.fonts.Refresh()
 		return true
 	}
 	if nl := nlScreenInst; nl != nil && nl.ready {
-		k.fonts, k.art, k.ready = nl.fonts, nl.art, true
+		k.fonts, k.art, k.ready = nl.fonts.Refresh(), nl.art, true
 		return true
 	}
 	if g == nil || g.cs == nil {

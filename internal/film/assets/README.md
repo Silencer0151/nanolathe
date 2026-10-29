@@ -51,3 +51,32 @@ kerned. Distribution source: Google Fonts, branch `main` at
 To reproduce, download them outside the checkout, verify the checksums and
 run `python3 tools/film-font-cyrillic DISPLAY.ttf BODY.ttf` (rasterized with
 Pillow 10.2.0 and FreeType 2.13.2).
+
+## Chinese
+
+Barlow has no Han characters. `tools/film-font-cjk` writes the full-width
+characters the Simplified Chinese catalog
+(`internal/i18n/locales/chinese.json`) draws into their own `display-cjk` and
+`body-cjk` pair, rasterized from the variable
+**Noto Sans SC** at weight 800 for `display` and 400 for `body` (Copyright
+2014-2021 Adobe (http://www.adobe.com/), with Reserved Font Name 'Source',
+SIL Open Font License 1.1, see [OFL.txt](OFL.txt)). Hanzi are rasterized
+below the atlas resolution the Latin faces use and carry a `scale` factor
+(face units per atlas pixel), so the pair stays a couple of megabytes while a
+character still sets at its proper size beside the Latin caps.
+
+The pair is deliberately separate from the shared atlases above, which every
+player loads in every language. `display-cjk` and `body-cjk` are read only when
+a language needs them: decoded on selection in the executable, and fetched from
+`film/` beside the wasm in the browser build. The base atlases are never
+written; the script reads their cap height and produces the pair from scratch,
+so a rerun from the pinned font and the catalog produces the same files.
+Distribution source: Google Fonts, commit
+`a85815a42757630ce188fdad368c2dfc444d4773`:
+
+- `ofl/notosanssc/NotoSansSC[wght].ttf`,
+  SHA-256 `a3041811a78c361b1de50f953c805e0244951c21c5bd412f7232ef0d899af0da`.
+
+To reproduce, download it outside the checkout, verify the checksum and run
+`python3 tools/film-font-cjk NOTOSANSSC.ttf internal/i18n/locales/chinese.json`
+(rasterized with Pillow 12.3.0 and FreeType 2.14.3).

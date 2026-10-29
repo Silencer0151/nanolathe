@@ -31,6 +31,7 @@ const English = "english"
 var Languages = []struct{ Code, Name string }{
 	{English, "English"},
 	{"ukrainian", "Українська"},
+	{"chinese", "简体中文"},
 }
 
 //go:embed locales/*.json

@@ -53,7 +53,9 @@ if manifest:
     (out / 'demo/manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
 revision = subprocess.check_output(['git', 'describe', '--always', '--dirty'], cwd=root, text=True).strip()
 build = dict(schema=1, version=revision, wasm=wasm_name, wasm_gz=wasm_name + '.gz', runtime=runtime_name, size=len(data), sha256=digest)
-browser_bundle(root / 'web', out, build)
+# The Chinese atlases stay out of the wasm. Their digests and files belong to
+# the hashed host bundle, fetched only when a language needs them.
+browser_bundle(root / 'web', out, build, root / 'internal/film/assets')
 print(f'Browser build: {out}')
 print(f'Wasm: {len(data)/1024**2:.1f} MiB raw, {(out/(wasm_name+".gz")).stat().st_size/1024**2:.1f} MiB gzip')
 if manifest:

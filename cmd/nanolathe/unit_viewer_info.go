@@ -2,12 +2,12 @@ package main
 
 import (
 	"fmt"
-	"math"
 	"strconv"
 	"strings"
 
 	"github.com/nanolathe-gg/nanolathe/internal/construction"
 	"github.com/nanolathe-gg/nanolathe/internal/content"
+	"github.com/nanolathe-gg/nanolathe/internal/i18n"
 	"github.com/nanolathe-gg/nanolathe/internal/platform/screenkit"
 )
 
@@ -37,6 +37,8 @@ const (
 	unitViewerRowLinkTail                   // the second row of the link above
 )
 
+// Every stored row is ready to draw Verbatim. Its builders translate UI text
+// before layout and retain authored text explicitly (DESIGN_I18N).
 type unitViewerRow struct {
 	Kind               unitViewerRowKind
 	Label, Value, Unit string
@@ -73,25 +75,25 @@ func (b *unitViewerRows) heading(title, caption string) {
 		b.add(unitViewerRow{Kind: unitViewerRowBlank})
 	}
 	b.card = false
-	b.add(unitViewerRow{Kind: unitViewerRowHeading, Label: title, Value: caption})
+	b.add(unitViewerRow{Kind: unitViewerRowHeading, Label: i18n.T(title), Value: i18n.T(caption)})
 }
 
 func (b *unitViewerRows) wrapped(kind unitViewerRowKind, text string, size float64) {
-	measure := func(s string) int {
-		return int(math.Ceil(unitViewerMeasure(s, screenkit.Style{Size: size}, false)))
-	}
-	for _, line := range retailWrapLines(text, measure, int(b.width)) {
+	for _, line := range unitViewerWrapLines(text, screenkit.Style{Size: size}, false, b.width) {
 		b.add(unitViewerRow{Kind: kind, Label: line})
 	}
 }
 
-func (b *unitViewerRows) text(s string) { b.wrapped(unitViewerRowText, s, unitViewerBodySize) }
-func (b *unitViewerRows) note(s string) { b.wrapped(unitViewerRowNote, s, unitViewerNoteSize) }
+func (b *unitViewerRows) text(s string) { b.wrapped(unitViewerRowText, i18n.T(s), unitViewerBodySize) }
+func (b *unitViewerRows) note(s string) { b.wrapped(unitViewerRowNote, i18n.T(s), unitViewerNoteSize) }
 
 // pair keeps label and value on one row while both fit; otherwise the value
 // wraps on its own rows below the label.
 func (b *unitViewerRows) pair(label, value, unit string) {
-	body := screenkit.Style{Size: unitViewerBodySize}
+	// Pair values are numbers or authored side/movement keys. Only the UI
+	// label and unit of measurement are translated.
+	label, unit = i18n.T(label), i18n.T(unit)
+	body := screenkit.Style{Size: unitViewerBodySize, Verbatim: true}
 	need := unitViewerMeasure(label, body, false) + unitViewerMeasure(value, body, false) + 12
 	if need <= b.width-unitViewerUnitWidth {
 		b.add(unitViewerRow{Kind: unitViewerRowPair, Label: label, Value: value, Unit: unit})
@@ -102,13 +104,14 @@ func (b *unitViewerRows) pair(label, value, unit string) {
 		return
 	}
 	b.add(unitViewerRow{Kind: unitViewerRowPair, Label: label})
-	b.text(strings.TrimSpace(value + " " + unit))
+	b.wrapped(unitViewerRowText, strings.TrimSpace(value+" "+unit), unitViewerBodySize)
 }
 
 func (b *unitViewerRows) tags(tags []string) {
 	var line []string
 	used := 0.0
 	for _, tag := range tags {
+		tag = i18n.T(tag)
 		w := unitViewerTagWidth(tag)
 		if len(line) > 0 && used+unitViewerTagGap+w > b.width {
 			b.add(unitViewerRow{Kind: unitViewerRowTags, Tags: line})
@@ -125,11 +128,11 @@ func (b *unitViewerRows) tags(tags []string) {
 }
 
 func unitViewerTagWidth(tag string) float64 {
-	return unitViewerMeasure(tag, screenkit.Style{Size: unitViewerTagSize, Tracking: 0.04, Upper: true}, false) + 2*unitViewerTagPad
+	return unitViewerMeasure(tag, screenkit.Style{Size: unitViewerTagSize, Tracking: 0.04, Upper: true, Verbatim: true}, false) + 2*unitViewerTagPad
 }
 
 func (b *unitViewerRows) link(def *content.UnitDef, detail string, modern bool) {
-	b.add(unitViewerRow{Kind: unitViewerRowLink, Link: def, Value: detail, Modern: modern})
+	b.add(unitViewerRow{Kind: unitViewerRowLink, Link: def, Value: i18n.T(detail), Modern: modern})
 	b.add(unitViewerRow{Kind: unitViewerRowLinkTail, Link: def, Modern: modern})
 }
 
@@ -155,7 +158,7 @@ func unitViewerStatsRows(def *content.UnitDef, width float64) []unitViewerRow {
 	}
 	b.heading("Overview", "")
 	if d := strings.TrimSpace(def.Description); d != "" {
-		b.text(d)
+		b.wrapped(unitViewerRowText, d, unitViewerBodySize)
 	}
 	if def.DiscoveryOnly {
 		// The secondary parse never populated the gameplay fields; their
@@ -340,7 +343,7 @@ func unitViewerWeaponCard(b *unitViewerRows, w *content.WeaponDef, slot string, 
 		name = w.CanonicalKey
 	}
 	b.card = true
-	b.add(unitViewerRow{Kind: unitViewerRowCard, Label: name, Value: slot})
+	b.add(unitViewerRow{Kind: unitViewerRowCard, Label: name, Value: i18n.T(slot)})
 	b.pair("Damage", fmt.Sprint(w.DamageDefault), "")
 	unitViewerDamageOverrides(b, w)
 	if firing {
@@ -440,7 +443,7 @@ func unitViewerDamageOverrides(b *unitViewerRows, w *content.WeaponDef) {
 			continue
 		}
 		b.pair(fmt.Sprintf("vs %d units", len(g.names)), fmt.Sprint(g.value), "")
-		b.note(strings.Join(g.names, ", "))
+		b.wrapped(unitViewerRowNote, strings.Join(g.names, ", "), unitViewerNoteSize)
 	}
 }
 

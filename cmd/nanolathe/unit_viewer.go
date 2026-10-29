@@ -128,6 +128,7 @@ type toolsScreen struct {
 	picsPending            int // pictures the last Draw requested that were still decoding
 	infoTab                int
 	infoRows               []unitViewerRow
+	infoLanguage           string // language used to lay out the retained rows
 	altHeld, shiftHeld     bool
 	pointerX, pointerY     float64 // logical pointer, for link hover
 	linkPress              *content.UnitDef
